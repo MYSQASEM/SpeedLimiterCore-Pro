@@ -18,14 +18,19 @@ jobs:
       with:
         java-version: '17'
         distribution: 'temurin'
-        # تم حذف سطر الـ cache تماماً من هنا ليتخطى عطل سيرفرات GitHub
 
     - name: Setup Gradle
       uses: gradle/gradle-command-action@v2
       with:
         gradle-version: 8.2
-        # إجبار الأداة على عدم استخدام أو حفظ الكاش
         cache-disabled: true 
 
     - name: Build with Gradle
       run: gradle assembleDebug --no-build-cache --stacktrace
+
+    # هذه هي الخطوة السحرية الجديدة لاستخراج ملف الـ APK للتحميل
+    - name: Upload APK Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: SpeedLimiter-Debug-APK
+        path: app/build/outputs/apk/debug/app-debug.apk
