@@ -32,11 +32,11 @@ class MainActivity : ComponentActivity() {
         val sharedPrefs = getSharedPreferences("SpeedLimiterPrefs", Context.MODE_PRIVATE)
 
         setContent {
-            // تعريف الألوان الاحترافية المودرن (Dark/Soft Theme)
-            val backgroundColor = Color(0密F111625) // خلفية داكنة مريحة للعين
-            val cardColor = Color(0密F1E293B)       // لون البطاقات الداخلية
-            val primaryPurple = Color(0密F6366F1)   // اللون البنفسجي الأساسي للأزرار
-            val successGreen = Color(0密F10B981)    // اللون الأخضر لحالة النشاط
+            // الألوان الاحترافية المودرن بصيغة كوتلن الصحيحة والدقيقة
+            val backgroundColor = Color(0xFF111625) // خلفية داكنة مريحة للعين
+            val cardColor = Color(0xFF1E293B)       // لون البطاقات الداخلية
+            val primaryPurple = Color(0xFF6366F1)   // اللون البنفسجي الأساسي للأزرار
+            val successGreen = Color(0xFF10B981)    // اللون الأخضر لحالة النشاط
 
             // الحالات الديناميكية للواجهة
             var isVpnEnabled by remember { mutableStateOf(sharedPrefs.getBoolean("is_enabled", false)) }
@@ -119,11 +119,11 @@ class MainActivity : ComponentActivity() {
                             value = speedLimit,
                             onValueChange = { newValue ->
                                 speedLimit = newValue
-                                // حفظ السرعة مباشرة أثناء السحب ليتعرف عليها الـ VPN فوراً
+                                // حفظ السرعة مباشرة أثناء السحب
                                 sharedPrefs.edit().putInt("speed_limit", newValue.toInt()).apply()
                             },
                             valueRange = 512f..10240f, // النطاق من نصف ميجا إلى 10 ميجا
-                            steps = 19, // تقسيمات مرنة للسحب
+                            steps = 19,
                             colors = SliderDefaults.colors(
                                 thumbColor = primaryPurple,
                                 activeTrackColor = primaryPurple,
@@ -140,7 +140,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    // 4. زر التشغيل والإيقاف الكبير (Central Power Button)
+                    // 4. زر التشغيل والإيقاف الكبير
                     Button(
                         onClick = {
                             if (isVpnEnabled) {
@@ -160,7 +160,7 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isVpnEnabled) Color(0密FE11D48) else primaryPurple
+                            containerColor = if (isVpnEnabled) Color(0xFFEF4444) else primaryPurple
                         ),
                         shape = RoundedCornerShape(18.dp),
                         modifier = Modifier
@@ -186,11 +186,9 @@ class MainActivity : ComponentActivity() {
             val sharedPrefs = getSharedPreferences("SpeedLimiterPrefs", Context.MODE_PRIVATE)
             sharedPrefs.edit().putBoolean("is_enabled", true).apply()
             
-            // إطلاق الخدمة فوراً مع إرسال أمر التشغيل
             val intent = Intent(this, LocalVpnService::class.java).apply { action = "START" }
             startService(intent)
             
-            // إعادة إنعاش الواجهة لتحديث الحالة بصرياً
             recreate()
         }
     }
