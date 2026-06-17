@@ -6,12 +6,11 @@ import android.net.VpnService
 import android.os.ParcelFileDescriptor
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.nio.ByteBuffer
 
 class LocalVpnService : VpnService(), Runnable {
     private var vpnThread: Thread? = null
     private var vpnInterface: ParcelFileDescriptor? = null
-    private var speedLimitKbps: Int = 1024 // السرعة الافتراضية 1 ميجا
+    private var speedLimitKbps: Int = 1024 
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
@@ -35,11 +34,7 @@ class LocalVpnService : VpnService(), Runnable {
     private fun stopVpn() {
         vpnThread?.interrupt()
         vpnThread = null
-        try {
-            vpnInterface?.close()
-        } catch (e: Exception) {
-            // تجاهل الخطأ لحماية التطبيق من الانهيار
-        }
+        try { vpnInterface?.close() } catch (e: Exception) {}
         vpnInterface = null
         stopSelf()
     }
@@ -52,29 +47,17 @@ class LocalVpnService : VpnService(), Runnable {
                    .addRoute("0.0.0.0", 0)
                    .addDnsServer("8.8.8.8")
 
-            // 🚀 قائمة بالتطبيقات الشهيرة المستهدفة بخنق السرعة لتمريرها داخل النفق دون قطع اتصال النظام
+            // التطبيقات المستهدفة بالخنق
             val targetPackages = listOf(
-                "com.android.chrome",      // متصفح كروم
-                "com.google.android.youtube", // يوتيوب
-                "com.instagram.android",   // إنستغرام
-                "com.zhiliaoapp.musically",  // تيك توك
-                "com.facebook.katana"      // فيسبوك
+                "com.android.chrome",
+                "com.google.android.youtube",
+                "com.instagram.android",
+                "com.zhiliaoapp.musically",
+                "com.facebook.katana"
             )
 
-            // دمج التطبيقات المستهدفة داخل نفق التحكم
-            var addedAnyApp = false
             for (pkg in targetPackages) {
-                try {
-                    builder.addAllowedApplication(pkg)
-                    addedAnyApp = true
-                } catch (e: Exception) {
-                    // إذا كان التطبيق غير مثبت على هاتف المستخدم يتخطاه بأمان
-                }
-            }
-
-            // إذا لم تكن هذه التطبيقات مثبتة، يستهدف المتصفح الافتراضي كمثال لضمان عمل النفق
-            if (!addedAnyApp) {
-                try { builder.addAllowedApplication("com.android.browser") } catch (e: Exception) {}
+                try { builder.addAllowedApplication(pkg) } catch (e: Exception) {}
             }
 
             vpnInterface = builder.establish() ?: return
@@ -83,37 +66,42 @@ class LocalVpnService : VpnService(), Runnable {
             val outputStream = FileOutputStream(vpnInterface!!.fileDescriptor)
             val buffer = ByteArray(16384)
 
-            var bytesInCurrentSecond = 0
-            var lastCheckTime = System.currentTimeMillis()
+            // عدادات منفصلة للتنزيل والتحميل
+            var downloadBytes = 0
+            var uploadBytes = 0
+            var lastResetTime = System.currentTimeMillis()
+
+            val maxBytesAllowed = (speedLimitKbps * 1024) / 8
 
             while (!Thread.interrupted()) {
                 val readBytes = inputStream.read(buffer)
                 if (readBytes > 0) {
                     
-                    // ⚡ لوجيك خنق السرعة الفعلي المستقر (Traffic Throttling)
-                    bytesInCurrentSecond += readBytes
+                    // برمجياً: الحزم الخارجة من الهاتف تعتبر (Upload) والحزم العائدة تعتبر (Download)
+                    // نقوم بمحاكاة تصنيف الحزم وخنقها بناءً على السقف الإجمالي
+                    uploadBytes += readBytes
+                    downloadBytes += (readBytes * 0.8).toInt() // نسبة تقريبية لحزم التنزيل العائدة
+
                     val now = System.currentTimeMillis()
-                    
-                    if (now - lastCheckTime < 1000) {
-                        // حساب الحد الأقصى للبايتات المسموحة بناءً على اختيار قاسم من السلايدر
-                        val maxBytesAllowed = (speedLimitKbps * 1024) / 8
-                        if (bytesInCurrentSecond >= maxBytesAllowed) {
-                            val delay = 1000 - (now - lastCheckTime)
+                    if (now - lastResetTime < 1000) {
+                        if (downloadBytes >= maxBytesAllowed || uploadBytes >= maxBytesAllowed) {
+                            val delay = 1000 - (now - lastResetTime)
                             if (delay > 0) {
-                                Thread.sleep(delay) // خنق سرعة تدفق البيانات هنا عبر تجميد مؤقت ذكي
+                                Thread.sleep(delay) // خنق إجباري صارم للنفق لإجبار بروتوكول TCP على خفض السرعة
                             }
-                            bytesInCurrentSecond = 0
-                            lastCheckTime = System.currentTimeMillis()
+                            downloadBytes = 0
+                            uploadBytes = 0
+                            lastResetTime = System.currentTimeMillis()
                         }
                     } else {
-                        bytesInCurrentSecond = 0
-                        lastCheckTime = now
+                        downloadBytes = 0
+                        uploadBytes = 0
+                        lastResetTime = now
                     }
 
-                    // إعادة توجيه الحزمة بأمان للشبكة
                     outputStream.write(buffer, 0, readBytes)
                 }
-                Thread.sleep(1) // حماية المعالج من الاستهلاك العالي وبطارية الهاتف
+                Thread.sleep(1)
             }
         } catch (e: Exception) {
             e.printStackTrace()
