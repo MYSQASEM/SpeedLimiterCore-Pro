@@ -15,11 +15,6 @@ android {
         versionName "1.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-
-        // 🚀 محرك معالجة ملفات الـ C++ المرتبط بمكتبة الـ VPN
-        ndk {
-            abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
-        }
     }
 
     buildTypes {
@@ -66,7 +61,4 @@ dependencies {
     implementation 'androidx.room:room-ktx:2.6.1'
 
     testImplementation 'junit:junit:4.13.2'
-    
-    // 🌐 محرك Tun2Socks الفعلي للتحكم بالسرعة
-    implementation 'com.github.eycorsican:badvpn-android:1.0.1'
 }
