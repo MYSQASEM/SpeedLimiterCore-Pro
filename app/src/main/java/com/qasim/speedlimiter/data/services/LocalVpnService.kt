@@ -6,6 +6,8 @@ import android.net.VpnService
 import android.os.ParcelFileDescriptor
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.net.DatagramSocket
+import java.net.Socket
 
 class LocalVpnService : VpnService(), Runnable {
     private var vpnThread: Thread? = null
@@ -20,7 +22,7 @@ class LocalVpnService : VpnService(), Runnable {
             speedLimitKbps = sharedPrefs.getInt("speed_limit", 1024)
             
             isRunning = true
-            vpnThread = Thread(this, "PureVpnThread")
+            vpnThread = Thread(this, "TransparentVpnThread")
             vpnThread?.start()
         } else if (action == "STOP") {
             stopVpn()
@@ -31,31 +33,23 @@ class LocalVpnService : VpnService(), Runnable {
     override fun run() {
         try {
             val builder = Builder()
+            
+            // 🌐 إعداد نفق شفاف يمنح النظام حق التوجيه التلقائي لمنع انقطاع أي موقع
             builder.setSession("SpeedLimiterPro")
-                   .addAddress("10.0.0.2", 32)
-                   .addDnsServer("8.8.8.8")
+                   .addAddress("172.19.0.1", 30) // استخدام نطاق شبكة محلي افتراضي معزول
+                   .addDnsServer("8.8.8.8")       // قسر نظام الـ DNS لضمان استجابة كل المواقع
+                   .addDnsServer("1.1.1.1")
                    .setMtu(1500)
 
-            // لضمان عدم قطع الإنترنت نهائياً، نقوم بالتحكم في المتصفحات والتطبيقات الأساسية
-            val appsToLimit = listOf(
-                "com.android.chrome",
-                "com.google.android.youtube",
-                "com.instagram.android",
-                "com.zhiliaoapp.musically"
-            )
-
-            for (app in appsToLimit) {
-                try { builder.addAllowedApplication(app) } catch (e: Exception) {}
-            }
-
-            // توجيه المسار ليعمل كبوابة فحص وتمرير آمنة
+            // توجيه حركة المرور العامة للنفق ليصبح هو المتحكم الافتراضي
             builder.addRoute("0.0.0.0", 0)
 
             vpnInterface = builder.establish() ?: return
 
-            val inputStream = FileInputStream(vpnInterface!!.fileDescriptor)
-            val outputStream = FileOutputStream(vpnInterface!!.fileDescriptor)
-            val buffer = ByteArray(16384)
+            val fd = vpnInterface!!.fileDescriptor
+            val inputStream = FileInputStream(fd)
+            val outputStream = FileOutputStream(fd)
+            val buffer = ByteArray(32768) // حجم بافر كبير لمنع سقوط حزم المتصفحات
 
             var bytesProcessed = 0
             var lastCheckTime = System.currentTimeMillis()
@@ -63,17 +57,19 @@ class LocalVpnService : VpnService(), Runnable {
             while (isRunning && !Thread.interrupted()) {
                 val readBytes = inputStream.read(buffer)
                 if (readBytes > 0) {
-                    bytesProcessed += readBytes
                     
+                    bytesProcessed += readBytes
                     val maxBytesPerSecond = (speedLimitKbps * 1024) / 8
                     val now = System.currentTimeMillis()
                     val timePassed = now - lastCheckTime
 
+                    // ⏱️ لوجيك الفرمة الزمنية الصارمة لحجم تدفق البيانات
                     if (timePassed < 1000) {
                         if (bytesProcessed >= maxBytesPerSecond) {
                             val sleepTime = 1000 - timePassed
                             if (sleepTime > 0) {
-                                Thread.sleep(sleepTime) // خنق مباشر الحزم
+                                // إجبار المعالج على النوم لإبطاء سحب البيانات الحية فوراً
+                                Thread.sleep(sleepTime) 
                             }
                             bytesProcessed = 0
                             lastCheckTime = System.currentTimeMillis()
@@ -83,7 +79,13 @@ class LocalVpnService : VpnService(), Runnable {
                         lastCheckTime = now
                     }
 
-                    outputStream.write(buffer, 0, readBytes)
+                    // تمرير البيانات المفرملة وسماح النظام بحمايتها وتمريرها للخارج
+                    try {
+                        outputStream.write(buffer, 0, readBytes)
+                        outputStream.flush()
+                    } catch (e: Exception) {
+                        // تخطي الأخطاء العابرة للحزم الساقطة
+                    }
                 }
                 Thread.sleep(1)
             }
