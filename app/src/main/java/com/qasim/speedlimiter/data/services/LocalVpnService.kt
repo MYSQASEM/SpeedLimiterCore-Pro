@@ -12,17 +12,26 @@ class LocalVpnService : VpnService(), Runnable {
     private var vpnInterface: ParcelFileDescriptor? = null
     private var vpnThread: Thread? = null
     private var isRunning = false
-    private var speedLimitKbps: Int = 1024
+    private var speedThrottler: NetworkThrottler? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
         if (action == "START") {
             val sharedPrefs = getSharedPreferences("SpeedLimiterPrefs", Context.MODE_PRIVATE)
-            speedLimitKbps = sharedPrefs.getInt("speed_limit", 1024)
+            val speedLimitKbps = sharedPrefs.getInt("speed_limit", 1024)
+            
+            // تحويل الكيلوبت في الثانية إلى بايتات في الثانية
+            val bytesPerSecond = (speedLimitKbps * 1024L) / 8L
+            
+            if (speedThrottler == null) {
+                speedThrottler = NetworkThrottler(bytesPerSecond, bytesPerSecond)
+            } else {
+                speedThrottler?.updateSpeed(bytesPerSecond, bytesPerSecond)
+            }
             
             if (!isRunning) {
                 isRunning = true
-                vpnThread = Thread(this, "SpeedVpnThread")
+                vpnThread = Thread(this, "ThrottledVpnThread")
                 vpnThread?.start()
             }
         } else if (action == "STOP") {
@@ -34,16 +43,11 @@ class LocalVpnService : VpnService(), Runnable {
     override fun run() {
         try {
             val builder = Builder()
-            builder.setSession("SpeedLimiterPass")
-                   .addAddress("192.168.2.2", 24)
-                   .addDnsServer("8.8.8.8")
+            builder.setSession("SpeedLimiterEngine")
+                   .addAddress("10.0.0.2", 24)
                    .addRoute("0.0.0.0", 0)
-
-            // قصر التحكم على المتصفح وتطبيقات معينة لضمان التمرير وتجنب الـ Loopback
-            val targetApps = listOf("com.android.chrome", "com.google.android.youtube")
-            for (app in targetApps) {
-                try { builder.addAllowedApplication(app) } catch (e: Exception) {}
-            }
+                   .addDnsServer("8.8.8.8")
+                   .setMtu(1500)
 
             vpnInterface = builder.establish() ?: return
 
@@ -51,30 +55,15 @@ class LocalVpnService : VpnService(), Runnable {
             val outputStream = FileOutputStream(vpnInterface!!.fileDescriptor)
             val buffer = ByteArray(16384)
 
-            var bytesSent = 0
-            var lastCheck = System.currentTimeMillis()
-
-            while (isRunning) {
+            while (isRunning && !Thread.interrupted()) {
                 val readBytes = inputStream.read(buffer)
                 if (readBytes > 0) {
-                    bytesSent += readBytes
-                    val maxBytesPerSecond = (speedLimitKbps * 1024) / 8
-                    val now = System.currentTimeMillis()
-
-                    if (now - lastCheck < 1000) {
-                        if (bytesSent >= maxBytesPerSecond) {
-                            val delay = 1000 - (now - lastCheck)
-                            if (delay > 0) Thread.sleep(delay)
-                            bytesSent = 0
-                            lastCheck = System.currentTimeMillis()
-                        }
-                    } else {
-                        bytesSent = 0
-                        lastCheck = now
-                    }
+                    // 🚀 استخدام سر الفرملة الذكية المأخوذة من تطبيقك الناجح
+                    speedThrottler?.limit(readBytes.toLong())
+                    
+                    // كتابة الحزمة بعد أن أخذت وقتها الصحيح في الانتظار المبرمج
                     outputStream.write(buffer, 0, readBytes)
                 }
-                Thread.sleep(1)
             }
         } catch (e: Exception) {
             e.printStackTrace()
