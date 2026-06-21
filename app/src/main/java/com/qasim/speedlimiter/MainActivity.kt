@@ -9,7 +9,7 @@ import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-// السطر السحري لحل المشكلة الأولى: استيراد الـ VPN من مساره الجديد
+import com.qasim.speedlimiter.R // استيراد ملف الموارد لحل مشكلة السيرفر
 import com.qasim.speedlimiter.data.services.LocalVpnService
 
 class MainActivity : AppCompatActivity() {
@@ -21,6 +21,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        // ربط الواجهة القديمة التي تفضلها
         val speedSeekBar = findViewById<SeekBar>(R.id.speedSeekBar)
         val currentSpeedText = findViewById<TextView>(R.id.currentSpeedText)
         val btnToggleVpn = findViewById<Button>(R.id.btnToggleVpn)
@@ -64,7 +65,7 @@ class MainActivity : AppCompatActivity() {
                 putExtra("SPEED_LIMIT", speedLimit)
             }
             startService(intent)
-            Toast.makeText(this, "تم تفعيل فرملة السرعة بنجاح!", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "تم تفعيل التحكم بالسرعة!", Toast.LENGTH_SHORT).show()
         }
     }
 }
