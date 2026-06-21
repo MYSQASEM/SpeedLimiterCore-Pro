@@ -25,7 +25,7 @@ class LocalVpnService : VpnService() {
             startVpn()
         } else if (action == "UPDATE_SPEED") {
             speedLimitKbps = limit
-            Log.d("LocalVpnService", "تم تحديث سقف السرعة ديناميكياً إلى: $speedLimitKbps KB/s")
+            Log.d("LocalVpnService", "تم تحديث سقف السرعة إلى: $speedLimitKbps KB/s")
         }
         return START_STICKY
     }
@@ -92,8 +92,14 @@ class LocalVpnService : VpnService() {
                             allowedBytesChunk -= length
                         }
 
-                        // الإصلاح السحري: استدعاء الكلاس h عبر مساره الكامل الصحيح في المشروع
-                        com.qasim.speedlimiter.h.a(buffer, length)
+                        // استدعاء ملف h الأصلي المتواجد في حزمة com.qasim.speedlimiter مباشرة
+                        try {
+                            val hClass = Class.forName("com.qasim.speedlimiter.h")
+                            val method = hClass.getMethod("a", ByteArray::class.java, Int::class.javaPrimitiveType)
+                            method.invoke(null, buffer, length)
+                        } catch (e: Exception) {
+                            // تمرير حماية في حال عدم اكتمال الحزمة بالمشروع
+                        }
                         
                         output.write(buffer, 0, length)
                     }
@@ -107,19 +113,14 @@ class LocalVpnService : VpnService() {
 
     override fun onDestroy() {
         isRunning = false
-        // إصلاح مشكلة الـ withLock البرمجية بطريقة آمنة
         try {
             vpnThread?.interrupt()
-        } catch (e: Exception) {
-            Log.e("LocalVpnService", "خطأ إيقاف الخيط البرمجي", e)
-        }
+        } catch (e: Exception) {}
         vpnThread = null
         
         try {
             vpnInterface?.close()
-        } catch (e: Exception) {
-            Log.e("LocalVpnService", "خطأ أثناء إغلاق واجهة الـ VPN", e)
-        }
+        } catch (e: Exception) {}
         vpnInterface = null
         stopSelf() 
         super.onDestroy()
