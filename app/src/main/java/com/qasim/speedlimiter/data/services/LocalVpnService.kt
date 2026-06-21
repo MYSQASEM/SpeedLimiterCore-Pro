@@ -34,15 +34,13 @@ class LocalVpnService : VpnService() {
         if (isRunning) return
         isRunning = true
 
-        // إعداد النفق مع السماح بمرور التطبيقات وتحديد الـ DNS الافتراضي لمنع انقطاع التصفح
         val builder = Builder()
             .setSession("SpeedLimiterCore")
             .addAddress("10.0.0.2", 32)
-            .addRoute("0.0.0.0", 0) // توجيه كامل حركة المرور
+            .addRoute("0.0.0.0", 0) 
             .addDnsServer("8.8.8.8")
             .addDnsServer("1.1.1.1")
             
-        // استثناء التطبيق نفسه من النفق لمنع الحلقة اللانهائية (Infinite Loop) التي تسبب خنق الإنترنت
         try {
             builder.addDisallowedApplication(packageName)
         } catch (e: Exception) {
@@ -68,7 +66,6 @@ class LocalVpnService : VpnService() {
             val output = FileOutputStream(vpnFd)
             val buffer = ByteArray(Short.MAX_VALUE.toInt())
 
-            // متغيرات التحكم بالسرعة (Token Bucket)
             var lastCheckTime = System.nanoTime()
             var allowedBytesChunk = 0L
 
@@ -79,52 +76,44 @@ class LocalVpnService : VpnService() {
                         val currentTime = System.nanoTime()
                         val elapsedTimeMs = (currentTime - lastCheckTime) / 1_000_000
                         
-                        // تحديث الرصيد المسموح به من البيانات بناءً على الوقت المنقضي والسرعة المحددة
                         if (elapsedTimeMs > 0) {
-                            // كمية البايتات المسموح بها في هذه اللحظة القصيرة
-                            allowedBytesChunk += (speedLimitKbps * 1024 * elapsedTimeMs) / 1000
+                            allowedBytesChunk += (speedLimitKbps.toLong() * 1024L * elapsedTimeMs) / 1000L
                             lastCheckTime = currentTime
                         }
 
-                        // إذا تجاوزت الحزمة السقف المسموح به حالياً، نقوم بتهدئة البث (تطبيق الفرملة)
                         if (allowedBytesChunk < length) {
-                            val sleepTime = ((length - allowedBytesChunk) * 1000) / (speedLimitKbps * 1024)
+                            val sleepTime = ((length - allowedBytesChunk) * 1000L) / (speedLimitKbps.toLong() * 1024L)
                             if (sleepTime > 0) {
-                                Thread.sleep(sleepTime.coerceAtMost(50)) // نوم خفيف للحفاظ على التصفح دون انقطاع
+                                // تعديل الحرف L هنا لجعله من نوع Long متوافق 100%
+                                Thread.sleep(sleepTime.coerceAtMost(50L)) 
                             }
-                            // إعادة حساب الوقت بعد التهدئة
                             lastCheckTime = System.nanoTime()
                             allowedBytesChunk = 0
                         } else {
                             allowedBytesChunk -= length
                         }
 
-                        // استدعاء ملف h.java من كودك الأصلي لحساب الـ Checksum للحزم المارة
                         h.a(buffer, length)
-                        
-                        // تمرير الحزمة إلى الشبكة
                         output.write(buffer, 0, length)
                     }
                 } catch (e: Exception) {
-                    Log.e("LocalVpnService", "خطأ أثناء تمرير البيانات عبر النفق", e)
+                    Log.e("LocalVpnService", "انقطاع حزمة البيانات داخل النفق", e)
                     break
                 }
             }
         }
     }
 
-    // إصلاح مشكلة بقاء الـ VPN متصلاً بعد إيقافه
     override fun onDestroy() {
         isRunning = false
-        vpnThread?.interrupt()
-        vpnThread = null
+        vpnThread?.withLock { vpnThread?.interrupt() }
         try {
             vpnInterface?.close()
         } catch (e: Exception) {
             Log.e("LocalVpnService", "خطأ أثناء إغلاق واجهة الـ VPN", e)
         }
         vpnInterface = null
-        stopSelf() // إنهاء الخدمة تماماً من الخلفية
+        stopSelf() 
         super.onDestroy()
     }
 }
