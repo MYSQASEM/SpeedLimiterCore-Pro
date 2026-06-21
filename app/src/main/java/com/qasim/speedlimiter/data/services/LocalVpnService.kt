@@ -10,8 +10,12 @@ import com.qasim.speedlimiter.data.services.z5.k
 import com.qasim.speedlimiter.data.services.z5.u1
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.net.InetSocketAddress
 import java.nio.ByteBuffer
+import java.nio.channels.DatagramChannel
+import java.nio.channels.SelectionKey
 import java.nio.channels.Selector
+import java.nio.channels.SocketChannel
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.BlockingQueue
 import java.util.concurrent.Executors
@@ -27,7 +31,6 @@ class LocalVpnService : VpnService(), Runnable {
     private var tcpSelector: Selector? = null
     private var udpSelector: Selector? = null
     
-    // طابور الحزم المخرجة المتوافق مع الكود الحركي المقتبس
     private val outputQueue: BlockingQueue<ByteBuffer> = ArrayBlockingQueue(2000)
     private val executorService = Executors.newSingleThreadExecutor()
 
@@ -37,7 +40,6 @@ class LocalVpnService : VpnService(), Runnable {
             val sharedPrefs = getSharedPreferences("SpeedLimiterPrefs", Context.MODE_PRIVATE)
             val speedLimitKbps = sharedPrefs.getInt("speed_limit", 1024)
 
-            // تحويل السرعة إلى بايتات في الثانية
             val bytesPerSecond = (speedLimitKbps * 1024L) / 8L
 
             if (speedController == null) {
@@ -51,7 +53,7 @@ class LocalVpnService : VpnService(), Runnable {
                 tcpSelector = Selector.open()
                 udpSelector = Selector.open()
 
-                // تشغيل محرك الـ TCP والـ UDP من مجلد z5
+                // تشغيل المحركات الحركية للجافا للاستماع للردود الخارجية
                 tcpThread = Thread(h(outputQueue, tcpSelector, speedController), "VpnTcpEngine")
                 udpThread = Thread(k(outputQueue, udpSelector, speedController), "VpnUdpEngine")
                 
@@ -88,19 +90,44 @@ class LocalVpnService : VpnService(), Runnable {
                 if (readBytes > 0) {
                     val packet = ByteBuffer.wrap(buffer, 0, readBytes)
                     
-                    // فرملة الحزم المدخلة (Upload) قبل توجيهها للـ Selectors
-                    speedController?.a(readBytes.toLong())
+                    if (readBytes < 20) continue
+                    val protocol = packet.get(9).toInt() and 0xFF
                     
-                    // في كود الجافا يتم دفع الحزمة لـ التوجيه الشفاف (NAT)
-                    // نقوم بإرسال حزم التصفح مباشرة للـ output queue مؤقتاً لضمان المرور الشفاف
-                    val packetCopy = ByteBuffer.allocate(readBytes)
-                    packetCopy.put(buffer, 0, readBytes)
-                    packetCopy.flip()
-                    outputQueue.put(packetCopy)
+                    // تطبيق فرملة الرفع (Upload) بناءً على حجم الحزمة الحقيقي
+                    speedController?.a(readBytes.toLong())
+
+                    // 🚀 التوجيه الصحيح: تفكيك وإرسال الحزم للقنوات الحقيقية بدلاً من حبسها داخلياً
+                    if (protocol == 6) { // TCP Protocol
+                        val destIp = "${packet.get(16).toInt() and 0xFF}.${packet.get(17).toInt() and 0xFF}.${packet.get(18).toInt() and 0xFF}.${packet.get(19).toInt() and 0xFF}"
+                        try {
+                            val socketChannel = SocketChannel.open()
+                            socketChannel.configureBlocking(false)
+                            protect(socketChannel.socket()) // حماية حتمية لمنع الـ Loopback
+                            socketChannel.connect(InetSocketAddress(destIp, 80))
+                            socketChannel.register(tcpSelector, SelectionKey.OP_CONNECT or SelectionKey.OP_READ, "TCP_Session")
+                            socketChannel.write(packet)
+                        } catch (e: Exception) {}
+                    } else if (protocol == 17) { // UDP Protocol (يتضمن الـ DNS للألعاب والمواقع)
+                        val destIp = "${packet.get(16).toInt() and 0xFF}.${packet.get(17).toInt() and 0xFF}.${packet.get(18).toInt() and 0xFF}.${packet.get(19).toInt() and 0xFF}"
+                        try {
+                            val datagramChannel = DatagramChannel.open()
+                            datagramChannel.configureBlocking(false)
+                            protect(datagramChannel.socket())
+                            datagramChannel.connect(InetSocketAddress(destIp, 53)) // ربطه بمنفذ الـ DNS أو الوجهة
+                            datagramChannel.register(udpSelector, SelectionKey.OP_READ, "UDP_Session")
+                            datagramChannel.write(packet)
+                        } catch (e: Exception) {}
+                    } else {
+                        // تمرير مباشر ومؤمن للحزم الفرعية الأخرى
+                        val packetCopy = ByteBuffer.allocate(readBytes)
+                        packetCopy.put(buffer, 0, readBytes)
+                        packetCopy.flip()
+                        outputQueue.put(packetCopy)
+                    }
                 }
             }
         } catch (e: Exception) {
-            Log.e("VpnService", "Error reading packets from interface", e)
+            Log.e("VpnService", "Error routing packets to selectors", e)
         } finally {
             try { inputStream?.close() } catch (e: Exception) {}
             stopVpn()
@@ -120,7 +147,7 @@ class LocalVpnService : VpnService(), Runnable {
                     }
                 }
             } catch (e: Exception) {
-                Log.e("VpnService", "Error writing packets to interface", e)
+                Log.e("VpnService", "Error writing back to interface", e)
             } finally {
                 try { outputStream?.close() } catch (e: Exception) {}
             }
