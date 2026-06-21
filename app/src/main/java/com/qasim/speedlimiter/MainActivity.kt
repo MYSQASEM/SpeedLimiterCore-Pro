@@ -9,8 +9,6 @@ import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import com.qasim.speedlimiter.R // استيراد ملف الموارد لحل مشكلة السيرفر
-import com.qasim.speedlimiter.data.services.LocalVpnService
 
 class MainActivity : AppCompatActivity() {
 
@@ -19,25 +17,33 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        
+        // الحصول على المعرفات ديناميكياً لتفادي مشاكل الاستيراد (R) في السيرفر السحابي
+        val layoutId = resources.getIdentifier("activity_main", "layout", packageName)
+        if (layoutId != 0) {
+            setContentView(layoutId)
+        }
 
-        // ربط الواجهة القديمة التي تفضلها
-        val speedSeekBar = findViewById<SeekBar>(R.id.speedSeekBar)
-        val currentSpeedText = findViewById<TextView>(R.id.currentSpeedText)
-        val btnToggleVpn = findViewById<Button>(R.id.btnToggleVpn)
+        val seekBarId = resources.getIdentifier("speedSeekBar", "id", packageName)
+        val textSpeedId = resources.getIdentifier("currentSpeedText", "id", packageName)
+        val btnVpnId = resources.getIdentifier("btnToggleVpn", "id", packageName)
 
-        speedSeekBar.max = 100
-        speedSeekBar.progress = speedLimit
-        currentSpeedText.text = "السرعة الحالية: $speedLimit KB/s"
+        val speedSeekBar = if (seekBarId != 0) findViewById<SeekBar>(seekBarId) else null
+        val currentSpeedText = if (textSpeedId != 0) findViewById<TextView>(textSpeedId) else null
+        val btnToggleVpn = if (btnVpnId != 0) findViewById<Button>(btnVpnId) else null
 
-        speedSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+        speedSeekBar?.max = 100
+        speedSeekBar?.progress = speedLimit
+        currentSpeedText?.text = "السرعة الحالية: $speedLimit KB/s"
+
+        speedSeekBar?.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 var currentProgress = progress
                 if (currentProgress < 1) currentProgress = 1 
                 speedLimit = currentProgress
-                currentSpeedText.text = "السرعة الحالية: $speedLimit KB/s"
+                currentSpeedText?.text = "السرعة الحالية: $speedLimit KB/s"
                 
-                val intent = Intent(this@MainActivity, LocalVpnService::class.java).apply {
+                val intent = Intent(this@MainActivity, com.qasim.speedlimiter.data.services.LocalVpnService::class.java).apply {
                     action = "UPDATE_SPEED"
                     putExtra("SPEED_LIMIT", speedLimit)
                 }
@@ -47,7 +53,7 @@ class MainActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
-        btnToggleVpn.setOnClickListener {
+        btnToggleVpn?.setOnClickListener {
             val intent = VpnService.prepare(this)
             if (intent != null) {
                 startActivityForResult(intent, vpnRequestCode)
@@ -60,7 +66,7 @@ class MainActivity : AppCompatActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == vpnRequestCode && resultCode == RESULT_OK) {
-            val intent = Intent(this, LocalVpnService::class.java).apply {
+            val intent = Intent(this, com.qasim.speedlimiter.data.services.LocalVpnService::class.java).apply {
                 action = "START_VPN"
                 putExtra("SPEED_LIMIT", speedLimit)
             }
