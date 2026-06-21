@@ -1,4 +1,4 @@
-package com.qasim.speedlimiter
+package com.qasim.speedlimiter.data.services
 
 import android.content.Intent
 import android.net.VpnService
@@ -84,7 +84,6 @@ class LocalVpnService : VpnService() {
                         if (allowedBytesChunk < length) {
                             val sleepTime = ((length - allowedBytesChunk) * 1000L) / (speedLimitKbps.toLong() * 1024L)
                             if (sleepTime > 0) {
-                                // تعديل الحرف L هنا لجعله من نوع Long متوافق 100%
                                 Thread.sleep(sleepTime.coerceAtMost(50L)) 
                             }
                             lastCheckTime = System.nanoTime()
@@ -93,7 +92,9 @@ class LocalVpnService : VpnService() {
                             allowedBytesChunk -= length
                         }
 
-                        h.a(buffer, length)
+                        // الإصلاح السحري: استدعاء الكلاس h عبر مساره الكامل الصحيح في المشروع
+                        com.qasim.speedlimiter.h.a(buffer, length)
+                        
                         output.write(buffer, 0, length)
                     }
                 } catch (e: Exception) {
@@ -106,7 +107,14 @@ class LocalVpnService : VpnService() {
 
     override fun onDestroy() {
         isRunning = false
-        vpnThread?.withLock { vpnThread?.interrupt() }
+        // إصلاح مشكلة الـ withLock البرمجية بطريقة آمنة
+        try {
+            vpnThread?.interrupt()
+        } catch (e: Exception) {
+            Log.e("LocalVpnService", "خطأ إيقاف الخيط البرمجي", e)
+        }
+        vpnThread = null
+        
         try {
             vpnInterface?.close()
         } catch (e: Exception) {
