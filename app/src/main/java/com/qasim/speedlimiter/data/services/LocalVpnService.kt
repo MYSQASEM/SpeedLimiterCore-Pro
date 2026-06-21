@@ -5,50 +5,63 @@ import android.content.Intent
 import android.net.VpnService
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import com.qasim.speedlimiter.data.services.z5.h
+import com.qasim.speedlimiter.data.services.z5.k
+import com.qasim.speedlimiter.data.services.z5.u1
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.net.InetSocketAddress
 import java.nio.ByteBuffer
-import java.nio.channels.SelectionKey
 import java.nio.channels.Selector
-import java.nio.channels.SocketChannel
-import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.BlockingQueue
 import java.util.concurrent.Executors
 
 class LocalVpnService : VpnService(), Runnable {
     private var vpnInterface: ParcelFileDescriptor? = null
     private var vpnThread: Thread? = null
-    private var selectorThread: Thread? = null
+    private var tcpThread: Thread? = null
+    private var udpThread: Thread? = null
     private var isRunning = false
+
+    private var speedController: u1? = null
+    private var tcpSelector: Selector? = null
+    private var udpSelector: Selector? = null
     
-    private var speedThrottler: NetworkThrottler? = null
-    private var selector: Selector? = null
-    private val outputQueue = Executors.newSingleThreadExecutor()
-    private val sessionMap = ConcurrentHashMap<String, SocketChannel>()
+    // طابور الحزم المخرجة المتوافق مع الكود الحركي المقتبس
+    private val outputQueue: BlockingQueue<ByteBuffer> = ArrayBlockingQueue(2000)
+    private val executorService = Executors.newSingleThreadExecutor()
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
         if (action == "START") {
             val sharedPrefs = getSharedPreferences("SpeedLimiterPrefs", Context.MODE_PRIVATE)
             val speedLimitKbps = sharedPrefs.getInt("speed_limit", 1024)
-            
+
+            // تحويل السرعة إلى بايتات في الثانية
             val bytesPerSecond = (speedLimitKbps * 1024L) / 8L
-            
-            if (speedThrottler == null) {
-                speedThrottler = NetworkThrottler(bytesPerSecond, bytesPerSecond)
+
+            if (speedController == null) {
+                speedController = u1(bytesPerSecond, bytesPerSecond)
             } else {
-                speedThrottler?.updateSpeed(bytesPerSecond, bytesPerSecond)
+                speedController?.updateSpeedLimits(bytesPerSecond, bytesPerSecond)
             }
-            
+
             if (!isRunning) {
                 isRunning = true
-                selector = Selector.open()
+                tcpSelector = Selector.open()
+                udpSelector = Selector.open()
+
+                // تشغيل محرك الـ TCP والـ UDP من مجلد z5
+                tcpThread = Thread(h(outputQueue, tcpSelector, speedController), "VpnTcpEngine")
+                udpThread = Thread(k(outputQueue, udpSelector, speedController), "VpnUdpEngine")
                 
+                tcpThread?.start()
+                udpThread?.start()
+
                 vpnThread = Thread(this, "VpnPacketReader")
                 vpnThread?.start()
                 
-                selectorThread = Thread({ runSelector() }, "VpnSelectorThread")
-                selectorThread?.start()
+                startWriteLoop()
             }
         } else if (action == "STOP") {
             stopVpn()
@@ -74,110 +87,42 @@ class LocalVpnService : VpnService(), Runnable {
                 val readBytes = inputStream.read(buffer)
                 if (readBytes > 0) {
                     val packet = ByteBuffer.wrap(buffer, 0, readBytes)
-                    processPacket(packet)
+                    
+                    // فرملة الحزم المدخلة (Upload) قبل توجيهها للـ Selectors
+                    speedController?.a(readBytes.toLong())
+                    
+                    // في كود الجافا يتم دفع الحزمة لـ التوجيه الشفاف (NAT)
+                    // نقوم بإرسال حزم التصفح مباشرة للـ output queue مؤقتاً لضمان المرور الشفاف
+                    val packetCopy = ByteBuffer.allocate(readBytes)
+                    packetCopy.put(buffer, 0, readBytes)
+                    packetCopy.flip()
+                    outputQueue.put(packetCopy)
                 }
             }
         } catch (e: Exception) {
-            Log.e("VpnService", "Error in Packet Reader", e)
+            Log.e("VpnService", "Error reading packets from interface", e)
         } finally {
             try { inputStream?.close() } catch (e: Exception) {}
             stopVpn()
         }
     }
 
-    private fun processPacket(packet: ByteBuffer) {
-        if (packet.remaining() < 20) return
-        
-        val protocol = packet.get(9).toInt() and 0xFF
-        
-        if (protocol == 6) { // TCP Protocol
-            val sourceIp = "${packet.get(12).toInt() and 0xFF}.${packet.get(13).toInt() and 0xFF}.${packet.get(14).toInt() and 0xFF}.${packet.get(15).toInt() and 0xFF}"
-            val destIp = "${packet.get(16).toInt() and 0xFF}.${packet.get(17).toInt() and 0xFF}.${packet.get(18).toInt() and 0xFF}.${packet.get(19).toInt() and 0xFF}"
-            
-            val sessionKey = "$sourceIp->$destIp"
-
-            if (!sessionMap.containsKey(sessionKey)) {
-                try {
-                    val targetChannel = SocketChannel.open()
-                    targetChannel.configureBlocking(false)
-                    protect(targetChannel.socket()) 
-                    targetChannel.connect(InetSocketAddress(destIp, 80)) 
-                    
-                    targetChannel.register(selector, SelectionKey.OP_CONNECT or SelectionKey.OP_READ, sessionKey)
-                    sessionMap[sessionKey] = targetChannel
-                } catch (e: Exception) {
-                    return
-                }
-            }
-
-            // 🚀 ضمان تحويل حجم الحزمة إلى Long بشكل صريح ومباشر
-            val packetSize = packet.remaining().toLong()
-            speedThrottler?.limit(packetSize)
-            
-            val channel = sessionMap[sessionKey]
-            if (channel != null && channel.isConnected) {
-                try { channel.write(packet) } catch (e: Exception) {}
-            }
-        } else {
-            // تمرير الحزم الأخرى مع التأكد من تحويل الأحجام لتفادي أي خطأ بنيوي
-            val dataSize = packet.remaining()
-            val dataCopy = ByteArray(dataSize)
-            packet.get(dataCopy)
-            writeToVpn(dataCopy, dataSize)
-        }
-    }
-
-    private fun runSelector() {
-        try {
-            while (isRunning && selector != null) {
-                if (selector!!.select(10) == 0) continue
-                val keys = selector!!.selectedKeys().iterator()
-                while (keys.hasNext()) {
-                    val key = keys.next()
-                    keys.remove()
-                    if (!key.isValid) continue
-
-                    val sessionKey = key.attachment() as String
-                    val channel = key.channel() as SocketChannel
-
-                    if (key.isConnectable) {
-                        if (channel.isConnectionPending) {
-                            try { channel.finishConnect() } catch (e: Exception) { key.cancel() }
-                        }
-                    } else if (key.isReadable) {
-                        val receiveBuffer = ByteBuffer.allocate(32768)
-                        val readBytes = channel.read(receiveBuffer)
-                        if (readBytes > 0) {
-                            receiveBuffer.flip()
-                            
-                            // 🚀 فرملة الـ Download بشكل صريح بتحويل القيمة إلى Long
-                            speedThrottler?.limit(readBytes.toLong())
-                            
-                            val responseData = ByteArray(readBytes)
-                            receiveBuffer.get(responseData)
-                            writeToVpn(responseData, readBytes)
-                        } else if (readBytes == -1) {
-                            channel.close()
-                            sessionMap.remove(sessionKey)
-                        }
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("VpnService", "Error in Selector Loop", e)
-        }
-    }
-
-    private fun writeToVpn(data: ByteArray, length: Int) {
-        outputQueue.submit {
+    private fun startWriteLoop() {
+        executorService.submit {
+            var outputStream: FileOutputStream? = null
             try {
                 vpnInterface?.fileDescriptor?.let { fd ->
-                    val outputStream = FileOutputStream(fd)
-                    outputStream.write(data, 0, length)
-                    outputStream.flush()
+                    outputStream = FileOutputStream(fd)
+                    while (isRunning) {
+                        val buffer = outputQueue.take()
+                        outputStream?.write(buffer.array(), 0, buffer.limit())
+                        outputStream?.flush()
+                    }
                 }
             } catch (e: Exception) {
-                // تخطي حزم الخرج العابرة
+                Log.e("VpnService", "Error writing packets to interface", e)
+            } finally {
+                try { outputStream?.close() } catch (e: Exception) {}
             }
         }
     }
@@ -185,22 +130,22 @@ class LocalVpnService : VpnService(), Runnable {
     private fun stopVpn() {
         isRunning = false
         vpnThread?.interrupt()
-        selectorThread?.interrupt()
-        try { selector?.close() } catch (e: Exception) {}
+        tcpThread?.interrupt()
+        udpThread?.interrupt()
+        
+        try { tcpSelector?.close() } catch (e: Exception) {}
+        try { udpSelector?.close() } catch (e: Exception) {}
         try { vpnInterface?.close() } catch (e: Exception) {}
         
-        for (channel in sessionMap.values) {
-            try { channel.close() } catch (e: Exception) {}
-        }
-        sessionMap.clear()
         vpnInterface = null
-        selector = null
+        tcpSelector = null
+        udpSelector = null
         stopSelf()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         stopVpn()
-        outputQueue.shutdownNow()
+        executorService.shutdownNow()
     }
 }
