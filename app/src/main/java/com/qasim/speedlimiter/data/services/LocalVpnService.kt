@@ -7,6 +7,8 @@ import android.util.Log
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.lang.Exception
+import java.net.DatagramSocket
+import java.net.Socket
 import kotlin.concurrent.thread
 
 class LocalVpnService : VpnService() {
@@ -25,7 +27,7 @@ class LocalVpnService : VpnService() {
             startVpn()
         } else if (action == "UPDATE_SPEED") {
             speedLimitKbps = limit
-            Log.d("LocalVpnService", "تم تحديث سقف السرعة إلى: $speedLimitKbps KB/s")
+            Log.d("LocalVpnService", "تم تحديث سقف السرعة ديناميكياً إلى: $speedLimitKbps KB/s")
         }
         return START_STICKY
     }
@@ -36,15 +38,17 @@ class LocalVpnService : VpnService() {
 
         val builder = Builder()
             .setSession("SpeedLimiterCore")
+            // إعداد العناوين الافتراضية القياسية للـ Local Loopback
             .addAddress("10.0.0.2", 32)
             .addRoute("0.0.0.0", 0) 
             .addDnsServer("8.8.8.8")
             .addDnsServer("1.1.1.1")
             
+        // السطر الحاسم: استثناء التطبيق نفسه لمنع الانهيار الدائري للشبكة
         try {
             builder.addDisallowedApplication(packageName)
         } catch (e: Exception) {
-            Log.e("LocalVpnService", "فشل استثناء الحزم المحلية", e)
+            Log.e("LocalVpnService", "فشل استثناء الحزمة المحلية", e)
         }
 
         try {
@@ -56,12 +60,7 @@ class LocalVpnService : VpnService() {
         }
 
         vpnThread = thread(start = true) {
-            val vpnFd = vpnInterface?.fileDescriptor
-            if (vpnFd == null) {
-                isRunning = false
-                return@thread
-            }
-
+            val vpnFd = vpnInterface?.fileDescriptor ?: return@thread
             val input = FileInputStream(vpnFd)
             val output = FileOutputStream(vpnFd)
             val buffer = ByteArray(Short.MAX_VALUE.toInt())
@@ -76,15 +75,17 @@ class LocalVpnService : VpnService() {
                         val currentTime = System.nanoTime()
                         val elapsedTimeMs = (currentTime - lastCheckTime) / 1_000_000
                         
+                        // حساب رصيد البايتات المسموح بتمريرها بناءً على السرعة المحددة بالسلايدر
                         if (elapsedTimeMs > 0) {
                             allowedBytesChunk += (speedLimitKbps.toLong() * 1024L * elapsedTimeMs) / 1000L
                             lastCheckTime = currentTime
                         }
 
+                        // إذا تجاوزت البيانات السرعة المحددة، نقوم بعمل فرملة (تأخير زمني بالملي ثانية)
                         if (allowedBytesChunk < length) {
                             val sleepTime = ((length - allowedBytesChunk) * 1000L) / (speedLimitKbps.toLong() * 1024L)
                             if (sleepTime > 0) {
-                                Thread.sleep(sleepTime.coerceAtMost(50L)) 
+                                Thread.sleep(sleepTime.coerceAtMost(30L)) // فرملة ذكية قصيرة لحجز الحزم مؤقتاً
                             }
                             lastCheckTime = System.nanoTime()
                             allowedBytesChunk = 0
@@ -92,25 +93,18 @@ class LocalVpnService : VpnService() {
                             allowedBytesChunk -= length
                         }
 
-                        // استدعاء ملف h الأصلي المتواجد في حزمة com.qasim.speedlimiter مباشرة
-                        try {
-                            val hClass = Class.forName("com.qasim.speedlimiter.h")
-                            val method = hClass.getMethod("a", ByteArray::class.java, Int::class.javaPrimitiveType)
-                            method.invoke(null, buffer, length)
-                        } catch (e: Exception) {
-                            // تمرير حماية في حال عدم اكتمال الحزمة بالمشروع
-                        }
-                        
+                        // تمرير الحزمة مباشرة إلى المخرج لتعود إلى نظام أندرويد بعد فرملتها زمنيّاً
                         output.write(buffer, 0, length)
                     }
                 } catch (e: Exception) {
-                    Log.e("LocalVpnService", "انقطاع حزمة البيانات داخل النفق", e)
+                    Log.e("LocalVpnService", "حدث استثناء أثناء تشغيل النفق", e)
                     break
                 }
             }
         }
     }
 
+    // حل مشكلة بقاء الـ VPN متصلاً في الخلفية بعد الضغط على إيقاف
     override fun onDestroy() {
         isRunning = false
         try {
