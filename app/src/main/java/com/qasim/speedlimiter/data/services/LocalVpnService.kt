@@ -12,7 +12,8 @@ class LocalVpnService : VpnService(), Runnable {
     private var isRunning = false
     private var speedLimitKbps: Int = 1024
     
-    private val sessionManager = VpnSessionManager()
+    // تهيئة مدير الجلسة وتمرير الـ Context له
+    private val sessionManager by lazy { VpnSessionManager(applicationContext) }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
@@ -20,10 +21,9 @@ class LocalVpnService : VpnService(), Runnable {
             val sharedPrefs = getSharedPreferences("SpeedLimiterPrefs", Context.MODE_PRIVATE)
             val inputLimit = sharedPrefs.getInt("speed_limit", 1024)
             
-            // تأكيد تلبية طلبك: أقل سرعة مسموحة هي 100kbps
+            // تطبيق شرط الـ 100kbps كحد أدنى بناءً على طلبك
             speedLimitKbps = if (inputLimit < 100) 100 else inputLimit
             
-            // إذا كان يعمل بالفعل، نقوم بتحديث السرعة ديناميكياً فور تحريك السلايدر دون إعادة تشغيل الـ VPN
             if (isRunning) {
                 sessionManager.setRateLimit(speedLimitKbps)
             } else {
@@ -41,11 +41,12 @@ class LocalVpnService : VpnService(), Runnable {
         try {
             val builder = Builder()
             builder.setSession("SpeedLimiterCorePro")
-                   .addAddress("10.0.0.2", 32)
+                   .addAddress("10.0.0.2", 24) // تغيير الـ Prefix إلى 24 ليتطابق مع الـ Netmask (255.255.255.0)
                    .addRoute("0.0.0.0", 0) 
                    .addDnsServer("8.8.8.8")
+                   .setMtu(1500)
 
-            // حزم التطبيقات الأساسية التي ستخضع للتقييد
+            // تحديد الحزم لتمرير الإنترنت لكل التطبيقات الأساسية التي فحصتها
             val targetApps = listOf(
                 "com.android.chrome", 
                 "com.google.android.youtube", 
@@ -58,7 +59,7 @@ class LocalVpnService : VpnService(), Runnable {
 
             vpnInterface = builder.establish() ?: return
 
-            // تشغيل محرك التقييد الاحترافي وتمرير النفق له
+            // تشغيل محرك نفق النيتيف الحقيقي المتواجد بمشروعك
             sessionManager.startSession(vpnInterface!!, speedLimitKbps)
 
             while (isRunning) {
