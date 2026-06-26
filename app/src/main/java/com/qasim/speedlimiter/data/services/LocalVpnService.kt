@@ -6,8 +6,6 @@ import android.net.VpnService
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.qasim.speedlimiter.utils.VpnSessionManager
-import java.net.DatagramSocket
-import java.net.Socket
 
 class LocalVpnService : VpnService(), Runnable {
     private var vpnInterface: ParcelFileDescriptor? = null
@@ -43,12 +41,12 @@ class LocalVpnService : VpnService(), Runnable {
 
         val builder = Builder()
         builder.setSession("SpeedLimiterCorePro")
-               .addAddress("10.0.0.2", 32)
-               .addRoute("0.0.0.0", 0) // إجبار النظام على تمرير حركة البيانات بالكامل داخل نفق التحديد
+               .addAddress("10.0.0.2", 24) // تم تعديل القناع إلى 24 ليطابق التطبيق الناجح تماماً
+               .addRoute("0.0.0.0", 0)     // التوجيه الكامل والعبقري لتمرير كل الحزم
                .addDnsServer("8.8.8.8")
                .setMtu(1500)
 
-        // تحديد التطبيقات المستهدفة بالتخنيق
+        // التطبيقات المستهدفة بالتخنيق والتمرير الذكي
         val targetApps = listOf(
             "com.android.chrome", 
             "com.google.android.youtube", 
@@ -62,8 +60,10 @@ class LocalVpnService : VpnService(), Runnable {
         vpnInterface = builder.establish()
         
         if (vpnInterface != null) {
-            // تشغيل مدير الجلسة لربط تدفق البيانات الحقيقي بخوارزمية التخنيق
+            // التعديل الجوهري: تمرير الـ FileDescriptor الخاص بالنفق الحقيقي للمحرك المطور
             sessionManager.startSession(vpnInterface!!.fileDescriptor, speedLimitKbps, this)
+        } else {
+            Log.e("LocalVpnService", "فشل في إنشاء واجهة الـ VPN")
         }
     }
 
