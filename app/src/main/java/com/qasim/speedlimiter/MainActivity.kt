@@ -17,7 +17,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.qasim.speedlimiter.data.services.LocalVpnService
@@ -39,6 +38,8 @@ class MainActivity : ComponentActivity() {
             val lightBlue = Color(0xFF38BDF8)
 
             var isVpnEnabled by remember { mutableStateOf(sharedPrefs.getBoolean("is_enabled", false)) }
+            
+            // تهيئة السلايدر بالقيمة المحفوظة أو القيمة الافتراضية 1024
             var speedLimit by remember { mutableStateOf(sharedPrefs.getInt("speed_limit", 1024).toFloat()) }
 
             Surface(modifier = Modifier.fillMaxSize(), color = backgroundColor) {
@@ -66,11 +67,11 @@ class MainActivity : ComponentActivity() {
                             modifier = Modifier.size(140.dp).clip(CircleShape).background(if (isVpnEnabled) successGreen.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.05f))
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                val speedDisplay = if (speedLimit >= 1024) "${String.format("%.1f", speedLimit / 1024f)} Mbps" else "${speedLimit.toInt()} Kbps"
+                                val speedDisplay = if (speedLimit >= 1000) "${String.format("%.1f", speedLimit / 1000f)} Mbps" else "${speedLimit.toInt()} Kbps"
                                 Text(
                                     text = speedDisplay,
                                     color = if (isVpnEnabled) successGreen else Color.White,
-                                    fontSize = 28.sp,
+                                    fontSize = 26.sp,
                                     fontWeight = FontWeight.Black
                                 )
                                 Text(
@@ -84,7 +85,7 @@ class MainActivity : ComponentActivity() {
 
                         Spacer(modifier = Modifier.height(24.dp))
 
-                        // 📊 إضافة عدادات التنزيل والتحميل الاحترافية (Download & Upload Indicators)
+                        // 📊 مؤشرات التنزيل والتحميل المتزنة والمحسنة منطقياً
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceEvenly
@@ -92,7 +93,7 @@ class MainActivity : ComponentActivity() {
                             // مؤشر التنزيل
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(text = "📥 التنزيل (DL)", color = lightBlue, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                val dlSpeed = if (speedLimit >= 1024) "${String.format("%.1f", (speedLimit * 0.85f) / 1024f)} Mbps" else "${(speedLimit * 0.85f).toInt()} Kbps"
+                                val dlSpeed = if (speedLimit >= 1000) "${String.format("%.1f", (speedLimit * 0.85f) / 1000f)} Mbps" else "${(speedLimit * 0.85f).toInt()} Kbps"
                                 Text(text = if (isVpnEnabled) dlSpeed else "0.0 Kbps", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                             }
                             
@@ -102,13 +103,13 @@ class MainActivity : ComponentActivity() {
                             // مؤشر التحميل
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(text = "📤 التحميل (UL)", color = primaryPurple, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                val ulSpeed = if (speedLimit >= 1024) "${String.format("%.1f", (speedLimit * 0.15f) / 1024f)} Mbps" else "${(speedLimit * 0.15f).toInt()} Kbps"
+                                val ulSpeed = if (speedLimit >= 1000) "${String.format("%.1f", (speedLimit * 0.50f) / 1000f)} Mbps" else "${(speedLimit * 0.50f).toInt()} Kbps"
                                 Text(text = if (isVpnEnabled) ulSpeed else "0.0 Kbps", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                             }
                         }
                     }
 
-                    // 3. السلايدر
+                    // 3. السلايدر المحدث بالنطاق الجديد المطلق
                     Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(cardColor).padding(24.dp)) {
                         Text(text = "اسحب لتحديد سقف السرعة الإجمالية:", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                         Spacer(modifier = Modifier.height(16.dp))
@@ -118,15 +119,20 @@ class MainActivity : ComponentActivity() {
                             onValueChange = { newValue ->
                                 speedLimit = newValue
                                 sharedPrefs.edit().putInt("speed_limit", newValue.toInt()).apply()
+                                
+                                // مزامنة حية وإرسال التحديث للخدمة النشطة مباشرة أثناء السحب
+                                if (isVpnEnabled) {
+                                    val intent = Intent(this@MainActivity, LocalVpnService::class.java).apply { action = "START" }
+                                    startService(intent)
+                                }
                             },
-                            valueRange = 512f..10240f,
-                            steps = 19,
+                            valueRange = 100f..30000f, // النطاق الحسابي المحدث: من 100 Kbps إلى 30 Mbps
                             colors = SliderDefaults.colors(thumbColor = primaryPurple, activeTrackColor = primaryPurple, inactiveTrackColor = Color.Gray.copy(alpha = 0.3f))
                         )
 
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(text = "512 Kbps", color = Color.Gray, fontSize = 12.sp)
-                            Text(text = "10 Mbps", color = Color.Gray, fontSize = 12.sp)
+                            Text(text = "100 Kbps", color = Color.Gray, fontSize = 12.sp)
+                            Text(text = "30 Mbps", color = Color.Gray, fontSize = 12.sp)
                         }
                     }
 
