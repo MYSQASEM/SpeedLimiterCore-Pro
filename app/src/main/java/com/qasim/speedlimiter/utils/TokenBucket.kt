@@ -1,42 +1,97 @@
 package com.qasim.speedlimiter.utils
 
-class TokenBucket(private val maxCapacity: Long, private val refillRatePerMs: Long) {
-    // نستخدم تزامناً مرناً أو المتغيرات المتقلبة لحماية الخيوط المتعددة في الـ VPN
-    private var tokens: Long = maxCapacity
+import android.util.Log
+
+class TokenBucket(private var capacity: Long, private var refillRatePerSecond: Long) {
+    
+    private var tokens: Long = capacity
     private var lastRefillTimestamp: Long = System.currentTimeMillis()
+    private var isPaused: Boolean = false
 
     /**
-     * دالة الاستهلاك المعدلة:
-     * لا تعيد true أو false، بل تحجز الحزمة وتنام (Sleep) حتى تتوفر مساحة لمرورها.
+     * الدالة الجوهرية (المطابقة للتابع a في كود المطور):
+     * تقوم بفحص الرصيد وخنق الخيط بدقة متناهية بالملي ثانية إذا تجاوزت البيانات السرعة المطلوبة
      */
     @Synchronized
-    fun consume(amount: Long) {
-        refill()
-
-        // إذا كانت النقاط الحالية لا تكفي لحجم الحزمة، ندخل في حلقة انتظار
-        while (tokens < amount) {
-            try {
-                // الانتظار لفترة قصيرة جداً (من 2 إلى 5 ملي ثانية) لمنع استهلاك المعالج CPU 100%
-                Thread.sleep(3) 
-            } catch (e: InterruptedException) {
-                Thread.currentThread().interrupt()
-                return
+    fun consume(bytesCount: Long) {
+        while (true) {
+            if (isPaused) {
+                try {
+                    (this as Object).wait(60000L)
+                } catch (e: Exception) {
+                    // تم إيقاظ الخيط أو مقاطعته
+                }
+            } else {
+                refillTokens()
+                
+                if (tokens >= bytesCount) {
+                    // الرصيد كافٍ، قم بخصم البايتات والمرور فوراً
+                    tokens -= bytesCount
+                    break
+                } else {
+                    // الرصيد غير كافٍ، احسب بدقة كم ملي ثانية نحتاج لامتلاء الخزان
+                    val bytesNeeded = bytesCount - tokens
+                    val millisecondsToWait = (bytesNeeded * 1000L) / refillRatePerSecond
+                    
+                    if (millisecondsToWait > 0) {
+                        try {
+                            // التوقف التزامني الدقيق (السر الذي منع تقطيع يوتيوب وفيسبوك)
+                            (this as Object).wait(millisecondsToWait.coerceAtMost(100L))
+                        } catch (e: Exception) {
+                            // تم تحديث السلايدر وإيقاظ الخيط
+                        }
+                    } else {
+                        // تأخير ضئيل جداً لمنع تجمد المعالج
+                        try { Thread.sleep(1) } catch (e: Exception) {}
+                    }
+                }
             }
-            // إعادة ملء السلة بعد الاستيقاظ لمعرفة هل توفرت نقاط جديدة؟
-            refill()
         }
-
-        // خصم النقاط بعد توفرها ومرور الحزمة بنجاح
-        tokens -= amount
     }
 
-    private fun refill() {
-        val now = System.currentTimeMillis()
-        val elapsedTime = now - lastRefillTimestamp
+    /**
+     * إعادة تعبئة الخزان بالتوكنز بناءً على الوقت المنقضي (مطابق للتابع b)
+     */
+    private fun refillTokens() {
+        val currentTime = System.currentTimeMillis()
+        val elapsedTime = currentTime - lastRefillTimestamp
+        
         if (elapsedTime > 0) {
-            val tokensToAdd = elapsedTime * refillRatePerMs
-            tokens = minOf(maxCapacity, tokens + tokensToAdd)
-            lastRefillTimestamp = now
+            val tokensToAdd = (elapsedTime * refillRatePerSecond) / 1000L
+            if (tokensToAdd > 0) {
+                tokens = (tokens + tokensToAdd).coerceAtMost(capacity)
+                lastRefillTimestamp = currentTime
+            }
         }
+    }
+
+    /**
+     * تحديث فوري وديناميكي عند سحب السلايدر (مطابق للتابع c)
+     * يقوم بتغيير السرعة وإيقاظ كافة الخيوط المنتظرة فوراً لإعادة الحساب بالسرعة الجديدة
+     */
+    @Synchronized
+    fun updateRate(newCapacity: Long, newRate: Long) {
+        this.capacity = newCapacity
+        this.refillRatePerSecond = newRate
+        if (this.tokens > newCapacity) {
+            this.tokens = newCapacity
+        }
+        Log.d("VpnCore", "تم تحديث محرك التخنيق فوريًا: $newRate Bytes/Sec")
+        
+        // إيقاظ فوري لجميع الخيوط المخنوقة لتطبيق السرعة الجديدة بدون تهنيج
+        (this as Object).notifyAll()
+    }
+
+    @Synchronized
+    fun pause() {
+        isPaused = true
+        (this as Object).notifyAll()
+    }
+
+    @Synchronized
+    fun resume() {
+        isPaused = false
+        lastRefillTimestamp = System.currentTimeMillis()
+        (this as Object).notifyAll()
     }
 }
