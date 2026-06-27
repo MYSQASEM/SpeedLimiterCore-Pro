@@ -1,4 +1,4 @@
-package com.speedlimiter.utils
+package com.qasim.speedlimiter.data.services
 
 import android.util.Log
 import java.io.IOException
