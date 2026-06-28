@@ -6,13 +6,7 @@ import android.net.VpnService
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.qasim.speedlimiter.utils.TokenBucket
-import com.qasim.speedlimiter.utils.TcpSelectorEngine
-import com.qasim.speedlimiter.utils.VpnConnectionSession
 import com.qasim.speedlimiter.utils.VpnSessionManager
-import java.nio.ByteBuffer
-import java.nio.channels.Selector
-import java.util.concurrent.ArrayBlockingQueue
-import java.util.concurrent.BlockingQueue
 
 class LocalVpnService : VpnService(), Runnable {
     private var vpnInterface: ParcelFileDescriptor? = null
@@ -20,16 +14,11 @@ class LocalVpnService : VpnService(), Runnable {
     @Volatile private var isRunning = false
     private var speedLimitKbps: Int = 1024
     
-    // إدخال أدوات الـ Selector Engine المشتقة من هندسة المطور الحقيقي
-    private var tcpSelector: Selector? = null
-    private var tcpEngineThread: Thread? = null
-    private val outputQueue: BlockingQueue<ByteBuffer> = ArrayBlockingQueue(2000)
-    
     private val sessionManager = VpnSessionManager()
 
     companion object {
-        // محرك السرعة الذكي والمتاح على مستوى الخدمة لربطه مع الـ Selector
-        // القيمة الافتراضية الابتدائية (مثال: 1024 كيلوبايت تحول إلى بايت/ثانية)
+        // محرك السرعة الذكي والمتاح على مستوى الخدمة لربطه مع الـ Session Manager
+        // القيمة الافتراضية الابتدائية (تُحسب بالبايت: كيلوبايت * 1024)
         val downloadBucket = TokenBucket(1024 * 1024L, 1024 * 1024L)
     }
 
@@ -41,7 +30,7 @@ class LocalVpnService : VpnService(), Runnable {
             
             speedLimitKbps = inputLimit.coerceIn(100, 30000)
             
-            // تحديث فوري للمحرك الرياضي لتطبيق السرعة الجديدة وإيقاظ أي خيوط تنتظر (wait)
+            // تحديث فوري للمحرك الرياضي لتطبيق السرعة الجديدة وإيقاظ خيوط التوقف الفوري
             val limitInBytes = speedLimitKbps * 1024L
             downloadBucket.updateRate(limitInBytes, limitInBytes)
             
@@ -81,18 +70,9 @@ class LocalVpnService : VpnService(), Runnable {
         vpnInterface = builder.establish()
         
         if (vpnInterface != null) {
-            // [إقلاع المحرك التزامني] تهيئة وتشغيل الـ Selector لقراءة الإنترنت الفعلي خارج النفق
-            try {
-                tcpSelector = Selector.open()
-                val tcpEngine = TcpSelectorEngine(tcpSelector!!, outputQueue)
-                tcpEngineThread = Thread(tcpEngine, "TcpSelectorEngineThread")
-                tcpEngineThread?.start()
-                Log.d("LocalVpnService", "تم إقلاع محرك الـ TcpSelectorEngine الفني بنجاح.")
-            } catch (e: Exception) {
-                Log.e("LocalVpnService", "فشل أثناء تهيئة محرك الـ Selector: ${e.message}")
-            }
-
+            // تشغيل الجلسة وتمرير النفق إلى الموزع المطور
             sessionManager.startSession(vpnInterface!!.fileDescriptor, speedLimitKbps, this)
+            Log.d("LocalVpnService", "تم إنشاء واجهة الـ VPN وتمرير الجلسة للمحرك بنجاح.")
         } else {
             Log.e("LocalVpnService", "فشل في إنشاء واجهة الـ VPN")
         }
@@ -117,18 +97,6 @@ class LocalVpnService : VpnService(), Runnable {
         isRunning = false
         sessionManager.stopSession()
         
-        // إيقاف خيوط المعالجة والـ Selector وتنظيف الذاكرة
-        tcpEngineThread?.interrupt()
-        tcpEngineThread = null
-        try {
-            tcpSelector?.close()
-        } catch (e: Exception) {}
-        tcpSelector = null
-        
-        // إغلاق قنوات الاتصال النشطة لمنع تسريب الحزم أو تجمد التطبيقات
-        VpnConnectionSession.closeAllSessions()
-        outputQueue.clear()
-
         vpnThread?.interrupt()
         vpnThread = null
         try { vpnInterface?.close() } catch (e: Exception) {}
