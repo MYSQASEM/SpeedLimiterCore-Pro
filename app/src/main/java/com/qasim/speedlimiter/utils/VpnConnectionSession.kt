@@ -6,52 +6,61 @@ import java.nio.channels.SocketChannel
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * الكلاس المسؤول عن إدارة جلسة الاتصال لكل تطبيق (مطابق تمامًا لـ g.java في كود المطور)
- * يقوم بربط الـ SocketChannel الحقيقي مع الـ TokenBucket الخاص بالتخنيق
+ * يمثل جلسة اتصال فرعية مستقلة لقناة الاتصال (SocketChannel)
+ * مسؤول عن تتبع حالة كل اتصال وتطبيق خنق السرعة الخاص به
  */
-class VpnConnectionSession(
-    val sessionKey: String,          // المعرف الفريد للجلسة (مثال: IP:Port المستهدف)
-    var sourceSequence: Long,         // رقم التسلسل للحزم القادمة (Sequence Number)
-    var acknowledgmentNumber: Long,   // رقم التأكيد (Ack Number)
-    val socketChannel: SocketChannel   // قناة السوكيت الحقيقية المتصلة بالإنترنت الفعلي
-) {
-    var connectionState: Int = 0     // حالة الاتصال (0: إغلاق، 1: جارٍ الاتصال، 2: متصل)
+class VpnConnectionSession {
+    var sessionKey: String = ""
+    var channel: SocketChannel? = null
     var selectionKey: SelectionKey? = null
+    var connectionState: Int = 0 // 0: مغلق، 1: جاري الاتصال، 2: متصل
     
-    // محرك التخنيق الخاص بالرفع والتحميل لهذه الجلسة
+    // ربط الجلسة بمحرك السرعة الخاص بها
     var downloadBucket: TokenBucket? = null
-    var uploadBucket: TokenBucket? = null
 
     companion object {
-        // مخزن جلسات الاتصال النشطة بالوقت الحقيقي (مطابق للـ LinkedHashMap/Map في كود المطور)
-        val activeSessions = ConcurrentHashMap<String, VpnConnectionSession>()
+        // قاموس للاحتفاظ بجميع الجلسات النشطة في الذاكرة
+        private val activeSessions = ConcurrentHashMap<String, VpnConnectionSession>()
+
+        fun addSession(key: String, session: VpnConnectionSession) {
+            activeSessions[key] = session
+        }
+
+        fun getSession(key: String): VpnConnectionSession? {
+            return activeSessions[key]
+        }
+
+        fun removeSession(key: String): VpnConnectionSession? {
+            return activeSessions.remove(key)
+        }
 
         /**
-         * إغلاق كافة الاتصالات النشطة فورًا عند إيقاف الـ VPN لمنع تسريب البيانات أو التهنيج
+         * إغلاق جلسة معينة وتحرير قنواتها بأمان
+         */
+        fun closeSession(session: VpnConnectionSession) {
+            session.connectionState = 0
+            try {
+                session.selectionKey?.cancel()
+                session.channel?.close()
+            } catch (e: IOException) {
+                // تجاهل الخطأ عند الإغلاق
+            }
+            activeSessions.remove(session.sessionKey)
+        }
+
+        /**
+         * تنظيف وإغلاق كافة الجلسات عند إيقاف الـ VPN
          */
         fun closeAllSessions() {
             val iterator = activeSessions.values.iterator()
             while (iterator.hasNext()) {
                 val session = iterator.next()
                 try {
-                    session.socketChannel.close()
-                } catch (e: IOException) {
-                    // القناة مغلقة بالفعل أو حدث خطأ أثناء الإغلاق
-                }
+                    session.selectionKey?.cancel()
+                    session.channel?.close()
+                } catch (e: IOException) {}
                 iterator.remove()
             }
-        }
-
-        /**
-         * إغلاق جلسة اتصال محددة عند انتهاء نقل البيانات أو حدوث خطأ (RST/FIN)
-         */
-        fun closeSession(session: VpnConnectionSession) {
-            try {
-                session.socketChannel.close()
-            } catch (e: IOException) {
-                // خطأ عادي أثناء الإغلاق
-            }
-            activeSessions.remove(session.sessionKey)
         }
     }
 }
