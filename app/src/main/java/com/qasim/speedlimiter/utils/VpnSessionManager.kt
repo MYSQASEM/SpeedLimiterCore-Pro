@@ -2,6 +2,7 @@ package com.qasim.speedlimiter.utils
 
 import android.net.VpnService
 import android.util.Log
+import com.qasim.speedlimiter.data.services.LocalVpnService
 import java.io.FileDescriptor
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -23,8 +24,9 @@ class VpnSessionManager {
         isSessionActive = true
         packetQueue.clear()
 
-        // حساب معدل نقل البيانات بالبايت في الثانية بناءً على السلايدر
-        val bytesPerSecond = (speedLimitKbps * 1000L) / 8L
+        // تحديث المحرك الرياضي العام فور بدء الجلسة
+        val bytesPerSecond = (speedLimitKbps * 1024L)
+        LocalVpnService.downloadBucket.updateRate(bytesPerSecond, bytesPerSecond)
 
         // 1. خيط القراءة (Reader Thread): يسحب الحزم من النظام بأقصى سرعة ويضعها في الطابور
         readerThread = thread(start = true, name = "VpnReaderThread") {
@@ -75,13 +77,8 @@ class VpnSessionManager {
 
                         // التقييد الصارم: حزم TCP (التصفح والـ Speedtest) تخضع لحسابات الوقت
                         if (protocolType != 17) { 
-                            val requiredDelayNano = (packetData.size.toDouble() / bytesPerSecond.toDouble()) * 1_000_000_000_000L
-                            val delayMs = (requiredDelayNano / 1_000_000).toLong()
-                            
-                            if (delayMs > 0) {
-                                // تأخير ذكي لخيط الضخ فقط، دون التأثير على خيط استقبال الشبكة الأساسي
-                                Thread.sleep(delayMs.coerceAtMost(80))
-                            }
+                            // استخدام محرك الـ TokenBucket لتطبيق خنق الملي ثانية الدقيق
+                            LocalVpnService.downloadBucket.consume(packetData.size.toLong())
                         }
 
                         // تجهيز الـ Buffer وضخ الحزمة المقيدة إلى الإنترنت
@@ -103,8 +100,10 @@ class VpnSessionManager {
     }
 
     fun setRateLimit(speedLimitKbps: Int) {
-        // سيتم اعتماد السرعة الجديدة تلقائياً عند إعادة بناء النفق أو التغيير الفوري
         Log.d("VpnCore", "تحديث سقف السرعة في المحرك إلى: $speedLimitKbps Kbps")
+        // عند سحب السلايدر، يتم إرسال القيمة الجديدة للمحرك وإيقاظ جميع الخيوط فوراً
+        val bytesPerSecond = (speedLimitKbps * 1024L)
+        LocalVpnService.downloadBucket.updateRate(bytesPerSecond, bytesPerSecond)
     }
 
     fun stopSession() {
