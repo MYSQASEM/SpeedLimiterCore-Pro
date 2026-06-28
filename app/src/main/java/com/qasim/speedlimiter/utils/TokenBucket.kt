@@ -9,8 +9,7 @@ class TokenBucket(private var capacity: Long, private var refillRatePerSecond: L
     private var isPaused: Boolean = false
 
     /**
-     * الدالة الجوهرية (المطابقة للتابع a في كود المطور):
-     * تقوم بفحص الرصيد وخنق الخيط بدقة متناهية بالملي ثانية إذا تجاوزت البيانات السرعة المطلوبة
+     * الدالة الجوهرية لخنق الحزم بناءً على الرصيد المتاح بالملي ثانية
      */
     @Synchronized
     fun consume(bytesCount: Long) {
@@ -19,29 +18,26 @@ class TokenBucket(private var capacity: Long, private var refillRatePerSecond: L
                 try {
                     (this as Object).wait(60000L)
                 } catch (e: Exception) {
-                    // تم إيقاظ الخيط أو مقاطعته
+                    // تم إيقاظ الخيط
                 }
             } else {
                 refillTokens()
                 
                 if (tokens >= bytesCount) {
-                    // الرصيد كافٍ، قم بخصم البايتات والمرور فوراً
                     tokens -= bytesCount
                     break
                 } else {
-                    // الرصيد غير كافٍ، احسب بدقة كم ملي ثانية نحتاج لامتلاء الخزان
+                    // حساب مدة الانتظار المطلوبة بدقة بالملي ثانية
                     val bytesNeeded = bytesCount - tokens
                     val millisecondsToWait = (bytesNeeded * 1000L) / refillRatePerSecond
                     
                     if (millisecondsToWait > 0) {
                         try {
-                            // التوقف التزامني الدقيق (السر الذي منع تقطيع يوتيوب وفيسبوك)
-                            (this as Object).wait(millisecondsToWait.coerceAtMost(100L))
+                            (this as Object).wait(millisecondsToWait.coerceAtMost(80L))
                         } catch (e: Exception) {
-                            // تم تحديث السلايدر وإيقاظ الخيط
+                            // تم تحديث السرعة أو الاستيقاظ
                         }
                     } else {
-                        // تأخير ضئيل جداً لمنع تجمد المعالج
                         try { Thread.sleep(1) } catch (e: Exception) {}
                     }
                 }
@@ -50,7 +46,7 @@ class TokenBucket(private var capacity: Long, private var refillRatePerSecond: L
     }
 
     /**
-     * إعادة تعبئة الخزان بالتوكنز بناءً على الوقت المنقضي (مطابق للتابع b)
+     * إعادة تعبئة الخزان بالتوكنز بناءً على الوقت المنقضي
      */
     private fun refillTokens() {
         val currentTime = System.currentTimeMillis()
@@ -66,8 +62,7 @@ class TokenBucket(private var capacity: Long, private var refillRatePerSecond: L
     }
 
     /**
-     * تحديث فوري وديناميكي عند سحب السلايدر (مطابق للتابع c)
-     * يقوم بتغيير السرعة وإيقاظ كافة الخيوط المنتظرة فوراً لإعادة الحساب بالسرعة الجديدة
+     * تحديث فوري وديناميكي عند سحب السلايدر وإيقاظ الخيوط المنتظرة فوراً
      */
     @Synchronized
     fun updateRate(newCapacity: Long, newRate: Long) {
@@ -76,9 +71,9 @@ class TokenBucket(private var capacity: Long, private var refillRatePerSecond: L
         if (this.tokens > newCapacity) {
             this.tokens = newCapacity
         }
-        Log.d("VpnCore", "تم تحديث محرك التخنيق فوريًا: $newRate Bytes/Sec")
+        Log.d("TokenBucket", "تم تحديث محرك التخنيق فوريًا: $newRate Bytes/Sec")
         
-        // إيقاظ فوري لجميع الخيوط المخنوقة لتطبيق السرعة الجديدة بدون تهنيج
+        // إيقاظ فوري لكافة الخيوط لتطبيق السرعة الجديدة بدون أي تهنيج
         (this as Object).notifyAll()
     }
 
