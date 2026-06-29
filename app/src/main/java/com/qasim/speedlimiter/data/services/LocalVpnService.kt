@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.VpnService
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import com.qasim.speedlimiter.AppConfig // استيراد ملف الإعدادات الجديد
 import com.qasim.speedlimiter.utils.TokenBucket
 import com.qasim.speedlimiter.utils.VpnSessionManager
 
@@ -29,7 +30,8 @@ class LocalVpnService : VpnService(), Runnable {
         val sharedPrefs = getSharedPreferences("SpeedLimiterPrefs", Context.MODE_PRIVATE)
         val inputLimit = intent?.getIntExtra("speed_limit", sharedPrefs.getInt("speed_limit", 1024)) ?: 1024
         
-        speedLimitKbps = inputLimit.coerceIn(100, 30000)
+        // استخدام الحدود الدنيا والعليا ديناميكياً من ملف AppConfig
+        speedLimitKbps = inputLimit.coerceIn(AppConfig.MIN_SPEED_LIMIT, AppConfig.MAX_SPEED_LIMIT)
         val limitInBytes = speedLimitKbps * 1024L
         
         // تحديث فوري للمحرك الرياضي لتطبيق السرعة الجديدة وإيقاظ خيوط التوقف الفوري
@@ -52,22 +54,25 @@ class LocalVpnService : VpnService(), Runnable {
         try { vpnInterface?.close() } catch (e: Exception) {}
 
         val builder = Builder()
-        builder.setSession("SpeedLimiterCorePro")
-               .addAddress("10.0.0.2", 24) 
-               .addRoute("0.0.0.0", 0)     
-               // إضافة أكثر من سيرفر DNS لضمان استقرار المتصفحات وتجنب سقوط حزم الـ TCP
-               .addDnsServer("8.8.8.8")
-               .addDnsServer("1.1.1.1")
-               .setMtu(1500)
+        
+        // قراءة إعدادات الشبكة ديناميكياً من ملف AppConfig المطور
+        builder.setSession(AppConfig.VPN_SESSION_NAME)
+               .addAddress(AppConfig.VPN_ADDRESS, 24) 
+               .addRoute(AppConfig.VPN_ROUTE, 0)     
+               .setMtu(AppConfig.VPN_MTU)
 
-        val targetApps = listOf(
-            "com.android.chrome", 
-            "com.google.android.youtube", 
-            "com.facebook.katana",
-            "org.zwanoo.android.speedtest"
-        )
-        for (app in targetApps) {
-            try { builder.addAllowedApplication(app) } catch (e: Exception) {}
+        // إضافة سيرفرات الـ DNS بشكل ديناميكي مكرر من الـ AppConfig لضمان ثبات التصفح والـ TCP
+        AppConfig.DNS_SERVERS.forEach { dns ->
+            builder.addDnsServer(dns)
+        }
+
+        // إضافة التطبيقات المستهدفة بالخنق ديناميكياً بلف حلقة تكرار حول القائمة في AppConfig
+        AppConfig.TARGET_APPLICATIONS.forEach { appPackage ->
+            try { 
+                builder.addAllowedApplication(appPackage) 
+            } catch (e: Exception) {
+                Log.e("LocalVpnService", "التطبيق غير مثبت على هذا الهاتف: $appPackage")
+            }
         }
 
         vpnInterface = builder.establish()
@@ -95,6 +100,8 @@ class LocalVpnService : VpnService(), Runnable {
             }
         } catch (e: Exception) {
             e.printStackTrace()
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
         } finally {
             stopVpn()
         }
