@@ -2,7 +2,8 @@ package com.qasim.speedlimiter.data.services
 
 import android.util.Log
 import com.qasim.speedlimiter.utils.VpnConnectionSession
-import com.qasim.speedlimiter.utils.TokenBucket
+import com.qasim.speedlimiter.utils.NetworkPacketUtils
+import com.qasim.speedlimiter.data.services.LocalVpnService
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.channels.SelectionKey
@@ -81,32 +82,28 @@ class TcpSelectorEngine(
         val session = key.attachment() as? VpnConnectionSession ?: return
         val channel = key.channel() as SocketChannel
         
-        // حجز بايت بفر مخصص لقراءة الحزمة
+        // حجز بايت بفر مخصص لقراءة الحزمة من الإنترنت الحقيقي
         val buffer = ByteBuffer.allocate(16384)
         
         try {
             val readBytes = channel.read(buffer)
             
             if (readBytes > 0) {
-                // [التخنيق الرياضي الدقيق] استدعاء الـ TokenBucket المطور بالـ Double لمنع سقوط الحزم
+                // 🚀 [التحكم الصارم بالسلايدر] استهلاك بايتات التحميل الحقيقية من الـ TokenBucket الخاص بالخدمة حياً
                 LocalVpnService.downloadBucket.consume(readBytes.toLong())
                 
                 buffer.flip()
                 
-                // هندسة بناء الحزمة الترويسية الكاملة:
-                // تنبيه: ترك 28 بايت فارغة دون ملء ترويسات IP/TCP يسبب إسقاط الحزم في الأندرويد.
-                // يجب تمرير هذه البيانات إلى كلاس NetworkPacketUtils لبناء الترويسة وحساب الـ Checksum
-                val packetBuffer = ByteBuffer.allocate(readBytes + 40) // ترويسة IP (20) + ترويسة TCP (20) = 40 بايت قياسي
+                // هندسة بناء الحزمة الترويسية الكاملة (20 بايت IP + 20 بايت TCP = 40 بايت ترويسة قياسية)
+                val packetBuffer = ByteBuffer.allocate(readBytes + 40)
                 
-                // هنا نقوم بصناعة الحزمة الترويسية الصحيحة قبل ضخها (مثال توجيهي يربط مع كلاس الأدوات لديك):
-                // com.qasim.speedlimiter.utils.NetworkPacketUtils.buildTcpPacket(packetBuffer, session, buffer, readBytes)
+                // 🚀 [الإصلاح المعجزة]: استدعاء كلاس الأدوات لملء الحزمة بالترويسات الحقيقية والـ Checksum ليفهمها الأندرويد ولا يسقطها
+                NetworkPacketUtils.buildTcpPacket(packetBuffer, session, buffer, readBytes)
                 
-                // الكود المؤقت الحالي مع إصلاح الحجم والـ Position:
-                packetBuffer.position(40)
-                packetBuffer.put(buffer)
-                packetBuffer.flip()
+                // تحديث أرقام الـ Sequence للمحافظة على تدفق واستقرار الجلسة دون انقطاع التصفح
+                session.sendNextSequenceNumber += readBytes
                 
-                // إرسال البيانات المعبأة كاملة وبثبات إلى نفق الـ VPN فورًا
+                // إرسال البيانات المغلفة بالترويسات السليمة والمحددة السرعة إلى طابور البث فوراً
                 outputQueue.put(packetBuffer)
                 
             } else if (readBytes < 0) {
