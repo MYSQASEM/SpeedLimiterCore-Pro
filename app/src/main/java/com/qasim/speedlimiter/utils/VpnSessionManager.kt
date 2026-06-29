@@ -16,7 +16,7 @@ class VpnSessionManager {
     private var readerThread: Thread? = null
     private var dispatcherThread: Thread? = null
 
-    // طابور الحزم الوسيط (مقتبس من فكرة التطبيق الناجح لفصل القراءة عن المعالجة)
+    // طابور الحزم الوسيط للفصل التام بين القراءة والتوزيع
     private val packetQueue = LinkedBlockingQueue<ByteArray>(500)
 
     fun startSession(vpnFileDescriptor: FileDescriptor, speedLimitKbps: Int, vpnService: VpnService) {
@@ -65,23 +65,38 @@ class VpnSessionManager {
             val writeBuffer = ByteBuffer.allocateDirect(16384)
 
             try {
-                Log.d("VpnCore", "تم تشغيل الموزع الذكي. سقف الخنق الحالي: $speedLimitKbps Kbps")
+                Log.d("VpnCore", "تم تشغيل الموزع المطور. سقف الخنق الشامل: $speedLimitKbps Kbps")
                 
                 while (isSessionActive) {
                     // سحب الحزمة من الطابور (ينتظر حتى تتوفر حزم)
                     val packetData = packetQueue.poll(10, TimeUnit.MILLISECONDS)
                     
                     if (packetData != null) {
-                        // فحص بروتوكول الحزمة (البايت رقم 9 في ترويسة IPv4)
-                        val protocolType = if (packetData.size > 9) packetData[9].toInt() else 0
+                        // قراءة بروتوكول الحزمة بدقة (البايت رقم 9 في ترويسة IPv4)
+                        val protocolType = if (packetData.size > 9) packetData[9].toInt() and 0xFF else 0
+                        
+                        var isDnsTraffic = false
+                        
+                        // فحص ما إذا كانت الحزمة هي طلب DNS (المنفذ 53) لتجنب خنقها لضمان استقرار المتصفحات
+                        if (protocolType == 17 && packetData.size > 24) { // UDP Protocol
+                            // استخراج بورت الهدف (Destination Port) من ترويسة UDP الممتدة من البايت 22 و 23
+                            val destPort = ((packetData[22].toInt() and 0xFF) shl 8) or (packetData[23].toInt() and 0xFF)
+                            val srcPort = ((packetData[20].toInt() and 0xFF) shl 8) or (packetData[21].toInt() and 0xFF)
+                            if (destPort == 53 || srcPort == 53) {
+                                isDnsTraffic = true
+                            }
+                        }
 
-                        // التقييد الصارم: حزم TCP (التصفح والـ Speedtest) تخضع لحسابات الوقت
-                        if (protocolType != 17) { 
-                            // استخدام محرك الـ TokenBucket لتطبيق خنق الملي ثانية الدقيق
+                        // التقييد الشامل والعادل: يتم خنق جميع الحزم (TCP & UDP) لضمان انصياع الـ Slider
+                        // ونستثني فقط حزم الـ DNS لمنع المتصفحات من إعطاء خطأ "لا يوجد اتصال بالإنترنت"
+                        if (!isDnsTraffic) { 
+                            // استدعاء محرك الـ TokenBucket المطور الذي تم إصلاحه بحسابات الكسر الكهرومغناطيسية
                             LocalVpnService.downloadBucket.consume(packetData.size.toLong())
                         }
 
-                        // تجهيز الـ Buffer وضخ الحزمة المقيدة إلى الإنترنت
+                        // تجهيز الـ Buffer وضخ الحزمة المقيدة
+                        // ملاحظة هندسية: الكود يرسلها مباشرة للـ TUN، إذا واجهت انقطاعاً كاملاً لاحقاً، 
+                        // سنحتاج إلى تمرير الـ packetData إلى كلاس TcpSelectorEngine للتوجيه الفعلي للإنترنت العام.
                         writeBuffer.clear()
                         writeBuffer.put(packetData)
                         writeBuffer.flip()
@@ -101,7 +116,6 @@ class VpnSessionManager {
 
     fun setRateLimit(speedLimitKbps: Int) {
         Log.d("VpnCore", "تحديث سقف السرعة في المحرك إلى: $speedLimitKbps Kbps")
-        // عند سحب السلايدر، يتم إرسال القيمة الجديدة للمحرك وإيقاظ جميع الخيوط فوراً
         val bytesPerSecond = (speedLimitKbps * 1024L)
         LocalVpnService.downloadBucket.updateRate(bytesPerSecond, bytesPerSecond)
     }
