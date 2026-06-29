@@ -15,6 +15,16 @@ class VpnConnectionSession {
     var selectionKey: SelectionKey? = null
     var connectionState: Int = 0 // 0: مغلق، 1: جاري الاتصال، 2: متصل
     
+    // ⬇️ [الإصلاح الجوهري] إضافة المتغيرات الرياضية وعناوين الـ IP المفقودة لتأمين بناء الحزم ونجاح الـ Build
+    var localAddressIp: Int = 0
+    var remoteAddressIp: Int = 0
+    var localPort: Int = 0
+    var remotePort: Int = 0
+    
+    // أرقام الـ Sequence الـخاصة ببروتوكول TCP للمحافظة على تزامن التصفح
+    var sendNextSequenceNumber: Int = 0
+    var receiveNextSequenceNumber: Int = 0
+    
     // ربط الجلسة بمحرك السرعة الخاص بها
     var downloadBucket: TokenBucket? = null
 
