@@ -3,6 +3,7 @@ package com.qasim.speedlimiter.utils
 import android.net.VpnService
 import android.util.Log
 import com.qasim.speedlimiter.data.services.LocalVpnService
+import com.qasim.speedlimiter.data.services.TcpSelectorEngine // 🚀 تفعيل مسار محرك السوكتات الصحيح
 import java.io.FileDescriptor
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -10,9 +11,6 @@ import java.nio.ByteBuffer
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
-
-// استيراد محرك السوكتات للتوجيه الصحيح
-// import com.qasim.speedlimiter.utils.TcpSelectorEngine 
 
 class VpnSessionManager {
     private var isSessionActive = false
@@ -79,14 +77,13 @@ class VpnSessionManager {
                         val protocolType = NetworkPacketUtils.getProtocolFromPacket(buffer)
                         
                         if (protocolType == 6) { // 6 = TCP Protocol
-                            // 🚀 [الإصلاح المعجزة]: كسر الحلقة المفرغة!
-                            // بدلاً من إعادة الحزمة لنظام الأندرويد لتدور في حلقة مفرغة وتسبب الانقطاع،
-                            // نمررها لمحرك الـ TCP الخارجي ليقوم بمعالجتها وفتح اتصال إنترنت حقيقي وخنق السرعة العائدة!
+                            // 🚀 [تفعيل المعالجة الحقيقية]: كسر الحلقة المفرغة نهائياً
+                            // تمرير الحزمة الصادرة فوراً إلى محرك السوكتات ليفتح اتصالاً بالإنترنت ويخنق التنزيل العائد
                             
-                            buffer.clear() // إعادة المؤشر للبداية قبل التمرير للمحرك
+                            buffer.clear() // إعادة المؤشر للبداية قبل التمرير
                             
-                            // افحص كود كلاس الـ TcpSelectorEngine لديك وقم باستدعاء دالة المعالجة الصادرة منه:
-                            // TcpSelectorEngine.processOutgoingPacket(buffer)
+                            // 🛠️ تفعيل الاستدعاء الفعلي للمحرك:
+                            TcpSelectorEngine.processOutgoingPacket(buffer)
                             
                         } else {
                             // الحزم الأخرى (مثل UDP والـ DNS المستثنى) تمرر مباشرة لتأمين استقرار المتصفح وعدم انقطاع الخدمات
