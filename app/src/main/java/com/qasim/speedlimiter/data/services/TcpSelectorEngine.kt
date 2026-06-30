@@ -20,8 +20,7 @@ import java.util.concurrent.BlockingQueue
  */
 class TcpSelectorEngine(
     private val selector: Selector,
-    private val outputQueue: BlockingQueue<ByteBuffer>, // الطابور الموجه لإعادة ضخ الحزم بالنفق
-    private val vpnService: VpnService // 🚀 تمرير مرجع الخدمة لتفعيل الـ protect
+    private val outputQueue: BlockingQueue<ByteBuffer> // الطابور الموجه لإعادة ضخ الحزم بالنفق
 ) : Runnable {
 
     companion object {
@@ -104,8 +103,14 @@ class TcpSelectorEngine(
                 val socketChannel = SocketChannel.open()
                 socketChannel.configureBlocking(false)
                 
-                // 🚀 [الإصلاح التاريخي الأخير]: حماية السوكت لمنعه من الدخول في حلقة مفرغة وتوجيهه للإنترنت الحقيقي فوراً
-                vpnService.protect(socketChannel.socket())
+                // 🚀 [الحل الذكي بدون تعديل ملفات أخرى]: جلب سياق الـ VPN الحالي حركياً وحماية السوكت لمنع الدورة المفرغة
+                val currentService = LocalVpnService.instance
+                if (currentService != null) {
+                    currentService.protect(socketChannel.socket())
+                } else {
+                    // حل احتياطي في حال عدم تعيين الـ instance
+                    (VpnConnectionSession::class.java.classLoader as? VpnService)?.protect(socketChannel.socket())
+                }
 
                 socketChannel.connect(InetSocketAddress(destAddress, destPort))
                 
