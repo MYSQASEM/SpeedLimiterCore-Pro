@@ -49,7 +49,6 @@ class MainActivity : ComponentActivity() {
 
     private val VPN_REQUEST_CODE = 24
 
-    // دالة آمنة لتحويل الـ Drawable إلى Bitmap دون الاعتماد على مكتبات خارجية قد تفشل في الـ Build
     private fun drawableToBitmap(drawable: Drawable): Bitmap {
         val bitmap = Bitmap.createBitmap(
             drawable.intrinsicWidth.coerceAtLeast(1),
@@ -62,7 +61,6 @@ class MainActivity : ComponentActivity() {
         return bitmap
     }
 
-    @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -111,8 +109,7 @@ class MainActivity : ComponentActivity() {
                 drawerState = drawerState,
                 drawerContent = {
                     ModalDrawerSheet(
-                        modifier = Modifier.width(300.dp).fillMaxHeight(),
-                        drawerContainerColor = Color.White
+                        modifier = Modifier.width(300.dp).fillMaxHeight()
                     ) {
                         Box(
                             modifier = Modifier.fillMaxWidth().height(180.dp).background(accentBlue),
@@ -161,24 +158,24 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             ) {
-                Scaffold(
-                    topBar = {
-                        TopAppBar(
-                            title = { Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) { Text("محدد السرعة", color = Color.White, fontWeight = FontWeight.Bold) } },
-                            navigationIcon = {
-                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                    Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Color.White)
-                                }
-                            },
-                            colors = TopAppBarDefaults.topAppBarColors(containerColor = backgroundColor)
-                        )
-                    },
-                    containerColor = backgroundColor
-                ) { innerPadding ->
+                Surface(modifier = Modifier.fillMaxSize(), color = backgroundColor) {
                     Column(
-                        modifier = Modifier.fillMaxSize().padding(innerPadding).padding(horizontal = 24.dp, vertical = 8.dp),
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+                        // البار العلوي اليدوي لتجنب مشاكل وعيوب تفاصيل الماتيريال 3 في الكومبايلر
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Color.White)
+                            }
+                            Text("محدد السرعة", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        // 1. العداد المركزي وحالة الخدمة
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(cardColor).padding(16.dp)
@@ -213,6 +210,7 @@ class MainActivity : ComponentActivity() {
 
                         Spacer(modifier = Modifier.height(12.dp))
 
+                        // 2. السلايدر
                         Column(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(cardColor).padding(16.dp)) {
                             Text(text = "اسحب لتحديد سقف السرعة الإجمالية:", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                             Slider(
@@ -232,6 +230,7 @@ class MainActivity : ComponentActivity() {
 
                         Spacer(modifier = Modifier.height(12.dp))
 
+                        // 3. شريط البحث وقائمة اختيار التطبيقات ديناميكياً
                         Column(modifier = Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(24.dp)).background(cardColor).padding(16.dp)) {
                             OutlinedTextField(
                                 value = searchQuery,
@@ -239,13 +238,7 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.fillMaxWidth(),
                                 placeholder = { Text("ابحث عن تطبيق...", color = Color.Gray) },
                                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.Gray) },
-                                singleLine = true,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = primaryPurple,
-                                    unfocusedBorderColor = Color.Gray,
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White
-                                )
+                                singleLine = true
                             )
 
                             Spacer(modifier = Modifier.height(8.dp))
@@ -296,6 +289,7 @@ class MainActivity : ComponentActivity() {
 
                         Spacer(modifier = Modifier.height(12.dp))
 
+                        // 4. زر تشغيل وإيقاف الـ VPN
                         Button(
                             onClick = {
                                 if (isVpnEnabled) {
