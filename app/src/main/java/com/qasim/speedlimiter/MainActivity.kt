@@ -3,6 +3,8 @@ package com.qasim.speedlimiter
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.drawable.Drawable
 import android.net.VpnService
 import android.os.Bundle
@@ -31,7 +33,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.graphics.drawable.toBitmap
 import com.qasim.speedlimiter.data.services.LocalVpnService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -47,6 +48,19 @@ data class AppUiInfo(
 class MainActivity : ComponentActivity() {
 
     private val VPN_REQUEST_CODE = 24
+
+    // دالة آمنة لتحويل الـ Drawable إلى Bitmap دون الاعتماد على مكتبات خارجية قد تفشل في الـ Build
+    private fun drawableToBitmap(drawable: Drawable): Bitmap {
+        val bitmap = Bitmap.createBitmap(
+            drawable.intrinsicWidth.coerceAtLeast(1),
+            drawable.intrinsicHeight.coerceAtLeast(1),
+            Bitmap.Config.ARGB_8888
+        )
+        val canvas = Canvas(bitmap)
+        drawable.setBounds(0, 0, canvas.width, canvas.height)
+        drawable.draw(canvas)
+        return bitmap
+    }
 
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -269,7 +283,7 @@ class MainActivity : ComponentActivity() {
                                                 Text(text = app.packageName, color = Color.Gray, fontSize = 10.sp)
                                             }
                                             Image(
-                                                bitmap = app.icon.toBitmap().asImageBitmap(),
+                                                bitmap = drawableToBitmap(app.icon).asImageBitmap(),
                                                 contentDescription = null,
                                                 modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp))
                                             )
