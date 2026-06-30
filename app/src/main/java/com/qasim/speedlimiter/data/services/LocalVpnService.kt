@@ -64,31 +64,17 @@ class LocalVpnService : VpnService(), Runnable {
 
     val builder = Builder()
     
-    // قراءة إعدادات الشبكة ديناميكياً من ملف AppConfig المطور
     builder.setSession(AppConfig.VPN_SESSION_NAME)
            .addAddress(AppConfig.VPN_ADDRESS, 24) 
-           .addRoute(AppConfig.VPN_ROUTE, 0)     
+           .addRoute("0.0.0.0", 0) // توجيه شامل ومستقر لكل الترافيك الصادر ليمر عبر السلايدر     
            .setMtu(AppConfig.VPN_MTU)
 
-    // 🚀 [الإصلاح الجذري لليوتيوب وفيسبوك]: إضافة دعم IPv6 لإجبار التطبيقات الحديثة على دخول النفق والخنق
-    try {
-        builder.addAddress("2001:db8::1", 64)
-               .addRoute("::", 0)
-    } catch (e: Exception) {
-        Log.e("LocalVpnService", "الجهاز لا يدعم توجيه IPv6: ${e.message}")
-    }
-
-    // إضافة سيرفرات الـ DNS بشكل ديناميكي مكرر من الـ AppConfig لضمان ثبات التصفح والـ TCP
+    // إضافة سيرفرات الـ DNS بشكل ديناميكي
     AppConfig.DNS_SERVERS.forEach { dns ->
         builder.addDnsServer(dns)
     }
 
-    // إضافة سيرفر DNS خاص بـ IPv6 للاستقرار
-    try {
-        builder.addDnsServer("2001:4860:4860::8888") // Google IPv6 DNS
-    } catch (e: Exception) {}
-
-    // إضافة التطبيقات المستهدفة بالخنق ديناميكياً بلف حلقة تكرار حول القائمة في AppConfig
+    // إضافة التطبيقات المستهدفة بالخنق
     AppConfig.TARGET_APPLICATIONS.forEach { appPackage ->
         try { 
             builder.addAllowedApplication(appPackage) 
@@ -96,6 +82,18 @@ class LocalVpnService : VpnService(), Runnable {
             Log.e("LocalVpnService", "التطبيق غير مثبت على هذا الهاتف: $appPackage")
         }
     }
+
+    vpnInterface = builder.establish()
+    
+    if (vpnInterface != null) {
+        // تشغيل الجلسة وتمرير النفق والمرجع الحركي للخدمة بنجاح
+        sessionManager.startSession(vpnInterface!!.fileDescriptor, speedLimitKbps, this)
+        Log.d("LocalVpnService", "تم إنشاء واجهة الـ VPN وتمرير الجلسة للمحرك بنجاح.")
+    } else {
+        Log.e("LocalVpnService", "فشل في إنشاء واجهة الـ VPN")
+        stopVpn()
+    }
+}
 
     vpnInterface = builder.establish()
     
